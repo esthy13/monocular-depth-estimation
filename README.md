@@ -21,6 +21,31 @@ How to add dependencies to the project:
 uv add torch
 ```
 
+## Example outputs
+
+Each visualization shows the input RGB (left) and predicted depth (right).
+Depth is colorized so **near = bright, far = dark**.
+
+### Perspective camera (ZED_B) — Depth Anything V2
+
+Sharpest result on standard pinhole images: the person and room edges are crisp.
+
+![Perspective — Depth Anything V2](docs/images/perspective_depth_anything_v2.png)
+
+### Fisheye camera (G1_A) — model difference
+
+The same fisheye frame with two models. Depth Anything V2 (relative depth) does
+not understand fisheye distortion and gives a flat, roughly radial result with a
+faint subject. Depth Any Camera (DAC) is distortion-aware and **metric** (metres),
+resolving the standing person and the hallway structure.
+
+| Depth Anything V2 (relative) | DAC `dac-indoor-resnet101` (metric) |
+| --- | --- |
+| ![Fisheye — Depth Anything V2](docs/images/fisheye_depth_anything_v2.png) | ![Fisheye — DAC indoor ResNet101](docs/images/fisheye_dac_indoor_resnet101.png) |
+
+**Takeaway:** use Depth Anything V2 for the perspective camera (sharpest), and
+DAC `dac-indoor-resnet101` for the fisheye camera (handles distortion + metric scale).
+
 ## Running monocular depth estimation
 
 All commands assume you run from inside `monocular-depth-estimation/`, with the

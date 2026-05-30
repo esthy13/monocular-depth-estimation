@@ -244,9 +244,14 @@ def main() -> None:
     cv2.imwrite(str(rgb_path), image)
     print(f"Saved RGB image:      {rgb_path}")
 
-    # 2. Side-by-side depth visualization (colormap range = valid pixels only)
+    # 2. Side-by-side depth visualization (colormap range = valid pixels only).
+    # Invert the colormap for metric models so near pixels render bright, matching
+    # the inverse-depth convention of Depth Anything (near = bright).
     vis_path = output_dir / f"{stem}_depth.png"
-    save_depth_visualization(depth, vis_path, rgb_image=image, valid_mask=valid_mask)
+    save_depth_visualization(
+        depth, vis_path, rgb_image=image, valid_mask=valid_mask,
+        invert=getattr(model, "is_metric", False),
+    )
     print(f"Saved visualization:  {vis_path}")
 
     # 3. Binary valid-region mask (only written when masking was applied)

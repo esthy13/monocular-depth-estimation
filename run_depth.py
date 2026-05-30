@@ -70,14 +70,26 @@ def parse_args() -> argparse.Namespace:
         "--model",
         type=str,
         default="depth_anything_v2",
-        help="Depth model identifier (see src/depth_models.py).",
+        help=(
+            "Depth model identifier. Options: 'depth_anything_v2', 'dac', "
+            "or a full DAC variant like 'dac-outdoor-resnet101'."
+        ),
     )
     parser.add_argument(
         "--encoder",
         type=str,
         default="small",
         choices=["small", "base", "large"],
-        help="Encoder size for Depth Anything V2.",
+        help="Encoder size for Depth Anything V2 (ignored for DAC).",
+    )
+    parser.add_argument(
+        "--variant",
+        type=str,
+        default=None,
+        help=(
+            "DAC model variant, e.g. 'dac-outdoor-resnet101'. "
+            "Only used when --model dac. If omitted, defaults to 'dac-outdoor-resnet101'."
+        ),
     )
     parser.add_argument(
         "--fisheye_mask",
@@ -102,6 +114,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    import math
+
     from src.utils import (
         load_intrinsics,
         load_extrinsics,
@@ -109,6 +123,7 @@ def main() -> None:
         create_fisheye_valid_mask,
         save_depth_visualization,
         save_mask_visualization,
+        intrinsics_to_dac_cam_params,
     )
     from src.depth_models import build_depth_model
 
@@ -119,6 +134,9 @@ def main() -> None:
     extrinsics = load_extrinsics(args.data_dir / "extrinsics.json")
     print(f"Intrinsics loaded for: {list(intrinsics.keys())}")
     print(f"Extrinsics loaded for: {list(extrinsics.keys())}")
+
+    # Determine camera model type early — used by both DAC config and fisheye masking
+    cam_model_type = intrinsics.get(args.sensor, {}).get("model", "perspective")
 
     if args.sensor in intrinsics:
         cam = intrinsics[args.sensor]
@@ -155,7 +173,30 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Depth estimation
     # ------------------------------------------------------------------
-    model = build_depth_model(args.model, encoder=args.encoder)
+    is_dac = args.model in ("dac",) or args.model.startswith("dac-")
+    model_kwargs: dict = {}
+
+    if is_dac:
+        # Build DAC camera params from the loaded intrinsics
+        cam_params = intrinsics_to_dac_cam_params(args.sensor, intrinsics)
+        # Compute crop FoV: 180° for fisheye, horizontal FoV for perspective
+        if cam_model_type == "fisheye":
+            crop_wfov = 180.0
+        else:
+            fx = intrinsics[args.sensor]["K"][0][0]
+            img_w = image.shape[1]
+            crop_wfov = math.degrees(2.0 * math.atan(img_w / (2.0 * fx)))
+        model_kwargs = {
+            "cam_params": cam_params,
+            "crop_wfov": crop_wfov,
+        }
+        if args.variant:
+            model_kwargs["variant"] = args.variant
+        print(f"DAC cam_params: {cam_params['camera_model']}  crop_wFov={crop_wfov:.1f}°")
+    else:
+        model_kwargs = {"encoder": args.encoder}
+
+    model = build_depth_model(args.model, **model_kwargs)
     model.load()
 
     depth = model.predict(image)
@@ -168,7 +209,6 @@ def main() -> None:
     # Fisheye mask (suppresses invalid lens-border pixels)
     # ------------------------------------------------------------------
     valid_mask = None
-    cam_model_type = intrinsics.get(args.sensor, {}).get("model", "perspective")
     apply_mask = (args.fisheye_mask == "auto" and cam_model_type == "fisheye")
 
     if apply_mask:

@@ -222,3 +222,6 @@ __marimo__/
 
 # Generated pipeline outputs
 outputs/
+
+# Third-party model repos cloned locally (e.g. Depth Any Camera)
+third_party/

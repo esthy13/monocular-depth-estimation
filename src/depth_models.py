@@ -22,6 +22,11 @@ import numpy as np
 class DepthModel(ABC):
     """Abstract interface for monocular depth estimation models."""
 
+    # True if predict() returns metric depth in metres (value grows with distance).
+    # False for inverse-depth / disparity-like output (value grows as objects near).
+    # This controls colormap direction so that near is always rendered bright.
+    is_metric: bool = False
+
     @abstractmethod
     def load(self) -> None:
         """Download weights (if needed) and load them into memory."""
@@ -50,6 +55,9 @@ class DepthAnythingV2(DepthModel):
         encoder: one of 'small', 'base', 'large'.
         device: 'cpu', 'cuda', or 'mps'. Auto-detected if None.
     """
+
+    # Depth Anything V2 predicts inverse depth (near = large value), not metric.
+    is_metric = False
 
     _MODEL_IDS = {
         "small": "depth-anything/Depth-Anything-V2-Small-hf",
@@ -192,6 +200,9 @@ class DepthAnyCamera(DepthModel):
         crop_wfov:  horizontal FoV of the ERP patch in degrees (180 for fisheye, ~100 for ZED).
         device:     'cpu', 'cuda', or 'mps'. Auto-detected if None.
     """
+
+    # DAC predicts metric depth in metres (near = small value).
+    is_metric = True
 
     HF_REPO = "yuliangguo/depth-any-camera"
     VARIANTS: dict[str, tuple[str, str]] = {

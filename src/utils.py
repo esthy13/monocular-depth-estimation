@@ -232,6 +232,7 @@ def colorize_depth(
     depth: np.ndarray,
     valid_mask: np.ndarray | None = None,
     colormap: str = "inferno",
+    invert: bool = False,
 ) -> np.ndarray:
     """Normalize and colorize a depth map, computing min/max from valid pixels only.
 
@@ -240,6 +241,8 @@ def colorize_depth(
         valid_mask: optional uint8/bool (H, W) mask — 1=valid, 0=invalid.
                     Invalid pixels are rendered black (0, 0, 0).
         colormap: matplotlib colormap name.
+        invert: reverse the colormap so near pixels are bright (use for metric
+                depth, where near = small value).
 
     Returns:
         uint8 (H, W, 3) RGB colorized depth image.
@@ -258,6 +261,8 @@ def colorize_depth(
         depth_norm[effective_mask] = (depth[effective_mask] - d_min) / (d_max - d_min)
 
     cmap = plt.get_cmap(colormap)
+    if invert:
+        cmap = cmap.reversed()
     colored = (cmap(depth_norm)[:, :, :3] * 255).astype(np.uint8)  # RGB
     colored[~effective_mask] = 0  # black for invalid/masked pixels
     return colored
@@ -273,6 +278,7 @@ def save_depth_visualization(
     rgb_image: np.ndarray | None = None,
     valid_mask: np.ndarray | None = None,
     colormap: str = "inferno",
+    invert: bool = False,
 ) -> None:
     """Save a colorized depth map as a PNG, optionally side-by-side with the RGB image.
 
@@ -285,6 +291,8 @@ def save_depth_visualization(
         rgb_image: optional BGR uint8 image to place left of the depth panel.
         valid_mask: optional uint8/bool (H, W) mask — 0=invalid (e.g. fisheye border).
         colormap: matplotlib colormap name (default 'inferno').
+        invert: reverse the colormap so near pixels are bright (use for metric
+                depth, where near = small value).
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -295,7 +303,10 @@ def save_depth_visualization(
         combined_invalid |= ~valid_mask.astype(bool)
     depth_display = ma.array(depth, mask=combined_invalid)
 
-    cmap = plt.get_cmap(colormap).copy()
+    cmap = plt.get_cmap(colormap)
+    if invert:
+        cmap = cmap.reversed()
+    cmap = cmap.copy()
     cmap.set_bad(color="black")  # invalid fisheye border → black
 
     depth_title = "Predicted Depth (valid region)" if valid_mask is not None else "Predicted Depth"

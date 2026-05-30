@@ -6,10 +6,13 @@ Usage:
 
 Examples:
     # ZED_B perspective camera, first frame
-    python run_depth.py --data_dir ../  --output_dir outputs
+    python run_depth.py --data_dir ../
 
-    # G1_A fisheye camera, frame index 5, recording2
-    python run_depth.py --data_dir ../ --sensor G1_A --recording recording2 --image_index 5
+    # G1_A fisheye camera — mask is applied automatically (camera model = fisheye)
+    python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 --image_index 5
+
+    # Disable fisheye masking explicitly
+    python run_depth.py --data_dir ../ --sensor G1_A --fisheye_mask none
 
     # Larger encoder (slower but sharper)
     python run_depth.py --data_dir ../ --encoder base
@@ -76,6 +79,23 @@ def parse_args() -> argparse.Namespace:
         choices=["small", "base", "large"],
         help="Encoder size for Depth Anything V2.",
     )
+    parser.add_argument(
+        "--fisheye_mask",
+        type=str,
+        default="auto",
+        choices=["auto", "none"],
+        help=(
+            "'auto': apply fisheye valid-region mask when camera model is fisheye "
+            "(determined from intrinsics). 'none': skip masking."
+        ),
+    )
+    parser.add_argument(
+        "--invalid_value",
+        type=str,
+        default="nan",
+        choices=["nan", "zero"],
+        help="Value written to invalid (masked) depth pixels (default: nan).",
+    )
     return parser.parse_args()
 
 
@@ -86,7 +106,9 @@ def main() -> None:
         load_intrinsics,
         load_extrinsics,
         find_rgb_images,
+        create_fisheye_valid_mask,
         save_depth_visualization,
+        save_mask_visualization,
     )
     from src.depth_models import build_depth_model
 
@@ -139,25 +161,64 @@ def main() -> None:
     depth = model.predict(image)
     print(
         f"Depth map: {depth.shape[1]}×{depth.shape[0]} px  "
-        f"range [{depth.min():.3f}, {depth.max():.3f}]"
+        f"raw range [{depth.min():.3f}, {depth.max():.3f}]"
     )
+
+    # ------------------------------------------------------------------
+    # Fisheye mask (suppresses invalid lens-border pixels)
+    # ------------------------------------------------------------------
+    valid_mask = None
+    cam_model_type = intrinsics.get(args.sensor, {}).get("model", "perspective")
+    apply_mask = (args.fisheye_mask == "auto" and cam_model_type == "fisheye")
+
+    if apply_mask:
+        print("Generating fisheye valid-region mask ...")
+        valid_mask = create_fisheye_valid_mask(image)
+        n_valid = int(valid_mask.sum())
+        print(
+            f"Valid pixels: {n_valid} / {valid_mask.size} "
+            f"({n_valid / valid_mask.size * 100:.1f}%)"
+        )
+        # Write invalid pixels with the chosen sentinel so they don't affect
+        # any downstream statistics or comparisons with stereo/LiDAR
+        invalid = ~valid_mask.astype(bool)
+        if args.invalid_value == "nan":
+            depth[invalid] = np.nan
+        else:
+            depth[invalid] = 0.0
+        valid_range = depth[valid_mask.astype(bool)]
+        print(
+            f"Depth range (valid only): "
+            f"[{np.nanmin(valid_range):.3f}, {np.nanmax(valid_range):.3f}]"
+        )
 
     # ------------------------------------------------------------------
     # Save outputs
     # ------------------------------------------------------------------
     stem = f"{args.recording}_{args.sensor}_{args.image_index:04d}"
     output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Colorized side-by-side visualization
+    # 1. Original RGB image
+    rgb_path = output_dir / f"{stem}_rgb.jpg"
+    cv2.imwrite(str(rgb_path), image)
+    print(f"Saved RGB image:      {rgb_path}")
+
+    # 2. Side-by-side depth visualization (colormap range = valid pixels only)
     vis_path = output_dir / f"{stem}_depth.png"
-    save_depth_visualization(depth, vis_path, rgb_image=image)
-    print(f"Saved visualization: {vis_path}")
+    save_depth_visualization(depth, vis_path, rgb_image=image, valid_mask=valid_mask)
+    print(f"Saved visualization:  {vis_path}")
 
-    # Raw depth array for later comparison with stereo / LiDAR
+    # 3. Binary valid-region mask (only written when masking was applied)
+    if valid_mask is not None:
+        mask_path = output_dir / f"{stem}_mask.png"
+        save_mask_visualization(valid_mask, mask_path)
+        print(f"Saved valid mask:     {mask_path}")
+
+    # 4. Raw depth array for later comparison with stereo / LiDAR
     raw_path = output_dir / f"{stem}_depth_raw.npy"
-    raw_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(raw_path, depth)
-    print(f"Saved raw depth: {raw_path}")
+    print(f"Saved raw depth:      {raw_path}")
 
 
 if __name__ == "__main__":

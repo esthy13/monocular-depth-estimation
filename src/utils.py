@@ -133,6 +133,48 @@ def match_by_timestamp(
 
 
 # ---------------------------------------------------------------------------
+# DAC camera parameter conversion
+# ---------------------------------------------------------------------------
+
+def intrinsics_to_dac_cam_params(sensor_name: str, intrinsics: dict) -> dict:
+    """Convert our intrinsics.json format to the cam_params dict expected by DAC.
+
+    DAC's cam_to_erp_patch_fast distinguishes two camera models:
+      - OPENCV_FISHEYE  (k1-k4 radial coefficients, fl_x/fl_y focal lengths)
+      - PINHOLE         (standard perspective, fx/fy)
+
+    Args:
+        sensor_name: key in the intrinsics dict, e.g. 'G1_A' or 'ZED_B'.
+        intrinsics: loaded from intrinsic.json.
+    """
+    cam = intrinsics[sensor_name]
+    K = cam["K"]
+    dist = cam.get("dist", [0.0, 0.0, 0.0, 0.0])
+    model = cam.get("model", "perspective")
+
+    if model == "fisheye":
+        return {
+            "camera_model": "OPENCV_FISHEYE",
+            "fl_x": float(K[0][0]),
+            "fl_y": float(K[1][1]),
+            "cx":   float(K[0][2]),
+            "cy":   float(K[1][2]),
+            "k1": float(dist[0]),
+            "k2": float(dist[1]),
+            "k3": float(dist[2]),
+            "k4": float(dist[3]),
+        }
+    else:
+        return {
+            "camera_model": "PINHOLE",
+            "fx": float(K[0][0]),
+            "fy": float(K[1][1]),
+            "cx": float(K[0][2]),
+            "cy": float(K[1][2]),
+        }
+
+
+# ---------------------------------------------------------------------------
 # Fisheye mask
 # ---------------------------------------------------------------------------
 

@@ -10,3 +10,11 @@
 UniDepthV2 if you want the simplest strong metric-depth baseline.
 Depth Any Camera if the fisheye camera is central, because it is designed for arbitrary camera types.
 Metric3Dv2 if you want a more geometry-focused foundation model.
+
+# What we found out:
+1. UniDepthV2 works out very well with perspective projection camera
+2. UniDepthV2 and Depth Any Camera don't work well with the fisheye camera (the border of the camera is detected as an element near the camera, and the rest is detected as very far away, and in the second case nothing is really detected) 
+3. Depth Any Camera does not work so well with perspective projection cameras like UniDepthV2 did. 
+
+Possible solution to current issues: https://github.com/guoyangzhao/FisheyeDepth
+they implement a depth model only for fisheye cameras.

@@ -1,0 +1,47 @@
+The current monocular depth pipeline works for perspective/ZED images, but the fisheye camera result is wrong because the model predicts depth for the black invalid area outside the circular fisheye image. This makes the visualization and depth range misleading.
+
+Please inspect the repo and fix the fisheye handling cleanly.
+
+Problem:
+- Input from camera G1_A is fisheye.
+- The valid image region is circular.
+- The black border outside the fisheye circle should not be passed/evaluated as meaningful scene content.
+- Current output shows the black outside region as high/invalid depth and distorts the color scale.
+
+Tasks:
+1. Add automatic fisheye valid-mask generation:
+   - Detect pixels outside the fisheye circle.
+   - Treat near-black pixels around the border as invalid.
+   - Create a binary mask where valid fisheye image pixels are 1 and outside-black pixels are 0.
+   - Use robust thresholding, e.g. pixels with RGB intensity below a small threshold near the image border.
+
+2. Apply the mask after depth prediction:
+   - Set invalid depth pixels to NaN or ignore them.
+   - Normalize/colorize the depth map using only valid pixels.
+   - Display invalid outside-fisheye pixels as black or transparent.
+   - Make sure the colorbar/range is computed only from valid pixels.
+
+3. Add CLI options:
+   - --camera_name G1_A
+   - --fisheye_mask auto
+   - --invalid_value nan
+   - Keep default behavior unchanged for perspective images like ZED_B.
+
+4. Save three outputs:
+   - RGB image
+   - predicted depth visualization with invalid fisheye border masked out
+   - binary valid mask visualization
+
+5. Important:
+   - Do not simply crop the image unless needed.
+   - Do not allow the black outside circle to influence min/max normalization.
+   - Keep the code modular, e.g. create_fisheye_valid_mask(image) and colorize_depth(depth, valid_mask=None).
+   - Add clear comments explaining that the mask is for invalid fisheye image regions, not object segmentation.
+
+6. Optional but recommended:
+   - Add support for Depth Any Camera / DAC indoor model for fisheye input.
+   - Since the data is indoor and fisheye, prefer dac-indoor-swinL or dac-indoor-resnet101.
+   - Keep the model interface extensible so we can switch between current model, Depth Anything, Metric3D, UniDepthV2, and DAC.
+
+Expected result:
+For G1_A fisheye images, the circular valid camera region should be used for visualization, while the black border outside the lens should be ignored. The depth colormap should represent only the real scene inside the fisheye circle.

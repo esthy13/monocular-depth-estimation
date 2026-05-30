@@ -10,7 +10,7 @@ monocular-depth-estimation/
 ```
 
 # To start the project
-Check that you have python and uv installed on your machine already, then create
+Check that you have python 3.12 and uv installed on your machine already, then create
 and start a virtual environment: 
 ```bash
 uv venv

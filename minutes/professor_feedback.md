@@ -3,7 +3,7 @@ Hey guys, i tried to calibrate the setup after our recording, but i was unable t
 
 You can find the data under this link (the password is "password"): https://uni-bielefeld.sciebo.de/s/9MQiScN548t3RCa
 It contains:
-- intrinsics.json -> Camera intrinsics of both cameras (fisheye+perspective) following the opencv conention of camera matrix K and distortion coefficients d
+- intrinsics.json -> Camera intrinsics of both cameras (fisheye+perspective) following the opencv convention of camera matrix K and distortion coefficients d
 - extrinsics.json -> Homogenous transformation matrices for all sensors describing their pose relative to the main reference sensor "G1_A" (the fisheye camera)
 - recordings 1-4 -> The recorded data for each sensor is under data/. To load sensor data from the same time, compare the filenames containing the system timestamp. The camera rgb images are stored as jpegs, the point clouds (from the lidars) and the depth images (from the stereocamera) are stored as numpy arrays.
 

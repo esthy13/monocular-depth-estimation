@@ -8,3 +8,16 @@ monocular-depth-estimation/
 └── references/
     └── res.bib
 ```
+
+# To start the project
+Check that you have python and uv installed on your machine already, then create
+and start a virtual environment: 
+```bash
+uv venv
+source .venv/bin/activate
+```
+How to add dependencies to the project:
+```
+uv add torch
+```
+

@@ -26,11 +26,16 @@ uv add torch
 Each visualization shows the input RGB (left) and predicted depth (right).
 Depth is colorized so **near = bright, far = dark**.
 
-### Perspective camera (ZED_B) — Depth Anything V2
+### Perspective camera (ZED_B) — model difference
 
-Sharpest result on standard pinhole images: the person and room edges are crisp.
+The same perspective frame with two models. Depth Anything V2 gives the sharpest,
+cleanest result (crisp subject and room edges) but in relative units. DAC is
+**metric** (metres) and works across camera types, but is softer on standard
+pinhole images.
 
-![Perspective — Depth Anything V2](docs/images/perspective_depth_anything_v2.png)
+| Depth Anything V2 (relative) | DAC `dac-indoor-resnet101` (metric) |
+| --- | --- |
+| ![Perspective — Depth Anything V2](docs/images/perspective_depth_anything_v2.png) | ![Perspective — DAC indoor ResNet101](docs/images/perspective_dac_indoor_resnet101.png) |
 
 ### Fisheye camera (G1_A) — model difference
 

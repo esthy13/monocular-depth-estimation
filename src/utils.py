@@ -181,8 +181,9 @@ def intrinsics_to_dac_cam_params(sensor_name: str, intrinsics: dict) -> dict:
 def create_fisheye_valid_mask(
     image: np.ndarray,
     black_threshold: int = 15,
+    erode_frac: float = 0.01,
 ) -> np.ndarray:
-    """Detect the valid circular lens region of a fisheye image.
+    """Detect the valid circular lens region of a fisheye image as a clean circle.
 
     Outside the fisheye lens circle the border is near-black — it is invalid
     lens area, NOT real scene content. This mask isolates the valid circle so
@@ -190,37 +191,50 @@ def create_fisheye_valid_mask(
 
     This is a lens-boundary mask, NOT object segmentation.
 
-    Strategy:
-      1. Threshold near-black pixels → coarse binary map of potentially valid pixels.
-      2. Morphological closing fills small dark patches inside the valid circle.
-      3. Keep the largest connected component, which is the fisheye circle.
+    The lens circle is a fixed geometric property of the camera, so the mask is
+    derived from the dark outer ring (independent of scene content) and returned
+    as a perfect circle — giving a clean, consistent border on every frame:
+      1. Flood-fill the near-black region connected to the image border → the
+         true outside-lens ring (interior dark objects stay valid).
+      2. Fit the minimum enclosing circle to the remaining disc.
+      3. Rasterize that circle, shrunk slightly to trim the dark vignette edge.
 
     Args:
         image: BGR uint8 image from a fisheye camera.
         black_threshold: pixels with grayscale value ≤ this are treated as
                          invalid border. Default 15 is robust to JPEG artifacts.
+        erode_frac: fraction of the radius to trim, removing the vignette ring.
 
     Returns:
         uint8 (H, W) mask — 1 = valid scene pixel, 0 = invalid fisheye border.
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
 
-    # Pixels above the threshold might be real scene content
-    _, binary = cv2.threshold(gray, black_threshold, 255, cv2.THRESH_BINARY)
+    # Near-black pixels are candidates for the outside-lens border
+    dark = (gray <= black_threshold).astype(np.uint8)
 
-    # Closing kernel sized ~1/30 of image fills dark objects/textures inside the
-    # circle without connecting the valid circle to the outer black border
-    k = max(image.shape[0], image.shape[1]) // 30
-    k += 1 - (k % 2)  # ensure odd
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-    closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    # Flood-fill dark pixels connected to the image corners → the true outer ring.
+    # Dark objects *inside* the lens are surrounded by bright scene, so they are
+    # not border-connected and remain part of the valid disc.
+    ff = dark.copy()
+    ff_mask = np.zeros((h + 2, w + 2), np.uint8)
+    for sx, sy in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
+        if ff[sy, sx]:
+            cv2.floodFill(ff, ff_mask, (sx, sy), 2)
+    inside = (ff != 2).astype(np.uint8)  # everything not in the outer ring
 
-    # Retain only the largest connected component (the fisheye circle)
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
-    # Label 0 is the background; find the largest non-background component
-    largest_label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    mask = (labels == largest_label).astype(np.uint8)
+    contours, _ = cv2.findContours(inside, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        # No border detected (not a circular fisheye) — treat the whole frame as valid
+        return np.ones((h, w), dtype=np.uint8)
 
+    largest = max(contours, key=cv2.contourArea)
+    (cx, cy), radius = cv2.minEnclosingCircle(largest)
+    radius *= (1.0 - erode_frac)  # trim the vignette ring for a clean edge
+
+    yy, xx = np.ogrid[:h, :w]
+    mask = ((xx - cx) ** 2 + (yy - cy) ** 2 <= radius ** 2).astype(np.uint8)
     return mask
 
 

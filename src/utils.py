@@ -9,6 +9,7 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import numpy.ma as ma
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +133,95 @@ def match_by_timestamp(
 
 
 # ---------------------------------------------------------------------------
+# Fisheye mask
+# ---------------------------------------------------------------------------
+
+def create_fisheye_valid_mask(
+    image: np.ndarray,
+    black_threshold: int = 15,
+) -> np.ndarray:
+    """Detect the valid circular lens region of a fisheye image.
+
+    Outside the fisheye lens circle the border is near-black — it is invalid
+    lens area, NOT real scene content. This mask isolates the valid circle so
+    the black border cannot distort depth normalization or colormap range.
+
+    This is a lens-boundary mask, NOT object segmentation.
+
+    Strategy:
+      1. Threshold near-black pixels → coarse binary map of potentially valid pixels.
+      2. Morphological closing fills small dark patches inside the valid circle.
+      3. Keep the largest connected component, which is the fisheye circle.
+
+    Args:
+        image: BGR uint8 image from a fisheye camera.
+        black_threshold: pixels with grayscale value ≤ this are treated as
+                         invalid border. Default 15 is robust to JPEG artifacts.
+
+    Returns:
+        uint8 (H, W) mask — 1 = valid scene pixel, 0 = invalid fisheye border.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Pixels above the threshold might be real scene content
+    _, binary = cv2.threshold(gray, black_threshold, 255, cv2.THRESH_BINARY)
+
+    # Closing kernel sized ~1/30 of image fills dark objects/textures inside the
+    # circle without connecting the valid circle to the outer black border
+    k = max(image.shape[0], image.shape[1]) // 30
+    k += 1 - (k % 2)  # ensure odd
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+
+    # Retain only the largest connected component (the fisheye circle)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
+    # Label 0 is the background; find the largest non-background component
+    largest_label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    mask = (labels == largest_label).astype(np.uint8)
+
+    return mask
+
+
+# ---------------------------------------------------------------------------
+# Depth colorization
+# ---------------------------------------------------------------------------
+
+def colorize_depth(
+    depth: np.ndarray,
+    valid_mask: np.ndarray | None = None,
+    colormap: str = "inferno",
+) -> np.ndarray:
+    """Normalize and colorize a depth map, computing min/max from valid pixels only.
+
+    Args:
+        depth: float32 (H, W) depth array. May contain NaN for invalid pixels.
+        valid_mask: optional uint8/bool (H, W) mask — 1=valid, 0=invalid.
+                    Invalid pixels are rendered black (0, 0, 0).
+        colormap: matplotlib colormap name.
+
+    Returns:
+        uint8 (H, W, 3) RGB colorized depth image.
+    """
+    effective_mask = np.isfinite(depth)
+    if valid_mask is not None:
+        effective_mask &= valid_mask.astype(bool)
+
+    d_valid = depth[effective_mask]
+    if d_valid.size == 0:
+        return np.zeros((*depth.shape, 3), dtype=np.uint8)
+
+    d_min, d_max = float(d_valid.min()), float(d_valid.max())
+    depth_norm = np.zeros_like(depth, dtype=np.float32)
+    if d_max > d_min:
+        depth_norm[effective_mask] = (depth[effective_mask] - d_min) / (d_max - d_min)
+
+    cmap = plt.get_cmap(colormap)
+    colored = (cmap(depth_norm)[:, :, :3] * 255).astype(np.uint8)  # RGB
+    colored[~effective_mask] = 0  # black for invalid/masked pixels
+    return colored
+
+
+# ---------------------------------------------------------------------------
 # Visualization
 # ---------------------------------------------------------------------------
 
@@ -139,35 +229,58 @@ def save_depth_visualization(
     depth: np.ndarray,
     output_path: Path,
     rgb_image: np.ndarray | None = None,
+    valid_mask: np.ndarray | None = None,
     colormap: str = "inferno",
 ) -> None:
     """Save a colorized depth map as a PNG, optionally side-by-side with the RGB image.
 
+    The colormap range is computed from valid pixels only, so an invalid fisheye
+    border cannot skew the scale. Invalid pixels are rendered black.
+
     Args:
-        depth: float32 depth array (H, W).
-        output_path: destination .png file path.
-        rgb_image: optional BGR uint8 image (H, W, 3) to place left of the depth.
+        depth: float32 (H, W) depth array. May contain NaN.
+        output_path: destination .png path.
+        rgb_image: optional BGR uint8 image to place left of the depth panel.
+        valid_mask: optional uint8/bool (H, W) mask — 0=invalid (e.g. fisheye border).
         colormap: matplotlib colormap name (default 'inferno').
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build a masked array so matplotlib computes colorbar range from valid pixels only
+    combined_invalid = ~np.isfinite(depth)
+    if valid_mask is not None:
+        combined_invalid |= ~valid_mask.astype(bool)
+    depth_display = ma.array(depth, mask=combined_invalid)
+
+    cmap = plt.get_cmap(colormap).copy()
+    cmap.set_bad(color="black")  # invalid fisheye border → black
+
+    depth_title = "Predicted Depth (valid region)" if valid_mask is not None else "Predicted Depth"
 
     if rgb_image is not None:
         fig, axes = plt.subplots(1, 2, figsize=(18, 7))
         axes[0].imshow(cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB))
         axes[0].set_title("RGB Image", fontsize=13)
         axes[0].axis("off")
-        im = axes[1].imshow(depth, cmap=colormap)
-        axes[1].set_title("Predicted Depth (relative)", fontsize=13)
+        im = axes[1].imshow(depth_display, cmap=cmap)
+        axes[1].set_title(depth_title, fontsize=13)
         axes[1].axis("off")
         plt.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
     else:
         fig, ax = plt.subplots(figsize=(10, 8))
-        im = ax.imshow(depth, cmap=colormap)
-        ax.set_title("Predicted Depth (relative)", fontsize=13)
+        im = ax.imshow(depth_display, cmap=cmap)
+        ax.set_title(depth_title, fontsize=13)
         ax.axis("off")
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
+
+
+def save_mask_visualization(mask: np.ndarray, output_path: Path) -> None:
+    """Save a binary valid-region mask as a grayscale PNG (white=valid, black=invalid)."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(output_path), mask * 255)

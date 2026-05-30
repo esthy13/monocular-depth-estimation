@@ -1,0 +1,67 @@
+You are working inside a Python project repository for a computer vision research project.
+
+Project goal:
+Investigate whether object detection models combined with monocular metric depth estimation models can detect and localize humans/objects in 3D using only a single RGB camera. The results should later be compared against physical depth sensors such as stereo depth and LiDAR.
+
+Context:
+The dataset contains:
+- intrinsics.json: camera intrinsics for fisheye and perspective cameras, using OpenCV convention with camera matrix K and distortion coefficients d.
+- extrinsics.json: homogeneous transformation matrices for all sensors, relative to the main reference sensor "G1_A" which is the fisheye camera.
+- recordings 1-4: recorded sensor data.
+  - RGB camera images are stored as .jpg files.
+  - Stereo depth images are stored as .npy files.
+  - LiDAR point clouds are stored as .npy files.
+  - Files belonging to the same timestamp can be matched by comparing the timestamp in the filename.
+
+Initial task:
+Set up the first working pipeline for monocular depth estimation.
+
+Please inspect the repository structure first, then implement the following in a clean and modular way:
+
+1. Create or update a Python script that:
+   - loads one RGB image from the recordings,
+   - runs a monocular depth estimation model on it,
+   - visualizes the predicted depth map,
+   - saves the output depth visualization to an output folder.
+
+2. Use a practical model interface.
+   - Prefer Depth Anything / Depth Anything V2 if already available or easy to integrate.
+   - If the repo already contains model code, use the existing structure instead of creating duplicate code.
+   - Keep the model-loading code isolated so that later we can also test Metric3Dv2, UniDepthV2, or DAC.
+
+3. Add utility functions for:
+   - loading intrinsics.json,
+   - loading extrinsics.json,
+   - finding RGB image files recursively inside the recordings,
+   - matching files by timestamp if the naming convention is clear,
+   - saving depth maps as colored visualizations.
+
+4. Add a simple command-line interface, for example:
+   python run_depth.py --data_dir /path/to/data --output_dir outputs --image_index 0
+
+5. Do not implement the full 3D evaluation yet.
+   For now, focus only on:
+   - loading RGB images,
+   - running monocular depth,
+   - visualizing depth,
+   - keeping the code ready for later comparison with stereo depth and LiDAR.
+
+6. Code quality requirements:
+   - Use pathlib instead of raw string paths.
+   - Add clear error messages if files are missing.
+   - Avoid hardcoded absolute paths.
+   - Keep functions small and readable.
+   - Add comments only where they explain non-obvious logic.
+   - Do not delete existing repo files unless clearly unnecessary.
+   - After making changes, provide a short summary of changed files and how to run the script.
+
+Future direction, but do not fully implement unless easy:
+The final pipeline will be:
+RGB image → object detector such as YOLO → monocular metric depth model → camera intrinsics → 2D-to-3D projection → compare against stereo/LiDAR ground truth.
+
+For later 3D projection, we will use:
+X = (u - cx) * Z / fx
+Y = (v - cy) * Z / fy
+Z = predicted depth
+
+Start by making the first monocular depth visualization pipeline work reliably.

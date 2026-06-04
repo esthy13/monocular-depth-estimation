@@ -180,9 +180,11 @@ def intrinsics_to_dac_cam_params(sensor_name: str, intrinsics: dict) -> dict:
 
 def create_fisheye_valid_mask(
     image: np.ndarray,
-    black_threshold: int = 15,
+    center: tuple[float, float] | None = None,
+    black_threshold: int = 20,
+    erode_frac: float = 0.01,
 ) -> np.ndarray:
-    """Detect the valid circular lens region of a fisheye image.
+    """Detect the valid circular lens region of a fisheye image as a clean circle.
 
     Outside the fisheye lens circle the border is near-black — it is invalid
     lens area, NOT real scene content. This mask isolates the valid circle so
@@ -190,37 +192,51 @@ def create_fisheye_valid_mask(
 
     This is a lens-boundary mask, NOT object segmentation.
 
-    Strategy:
-      1. Threshold near-black pixels → coarse binary map of potentially valid pixels.
-      2. Morphological closing fills small dark patches inside the valid circle.
-      3. Keep the largest connected component, which is the fisheye circle.
+    The lens circle is fixed camera geometry. Its centre is the principal point
+    (pass via `center` from the intrinsics); its radius is found from where the
+    dark outer region begins, measured outward from that centre. Interior dark
+    objects are excluded by keeping only the border-connected dark region, so the
+    estimate is independent of scene content and the same on every frame.
 
     Args:
         image: BGR uint8 image from a fisheye camera.
+        center: (cx, cy) lens centre in pixels — the camera principal point.
+                Defaults to the image centre if not provided.
         black_threshold: pixels with grayscale value ≤ this are treated as
-                         invalid border. Default 15 is robust to JPEG artifacts.
+                         invalid border. Default 20 is robust to JPEG/vignette.
+        erode_frac: fraction of the radius to trim, removing the vignette ring.
 
     Returns:
         uint8 (H, W) mask — 1 = valid scene pixel, 0 = invalid fisheye border.
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    cx, cy = center if center is not None else (w / 2.0, h / 2.0)
 
-    # Pixels above the threshold might be real scene content
-    _, binary = cv2.threshold(gray, black_threshold, 255, cv2.THRESH_BINARY)
+    dark = (gray <= black_threshold).astype(np.uint8)
 
-    # Closing kernel sized ~1/30 of image fills dark objects/textures inside the
-    # circle without connecting the valid circle to the outer black border
-    k = max(image.shape[0], image.shape[1]) // 30
-    k += 1 - (k % 2)  # ensure odd
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-    closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    # Keep only dark pixels connected to the image corners — the true outside-lens
+    # region. Dark objects inside the lens are surrounded by bright scene and stay
+    # excluded, so they cannot pull the radius estimate inward.
+    ff = dark.copy()
+    ff_mask = np.zeros((h + 2, w + 2), np.uint8)
+    for sx, sy in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
+        if ff[sy, sx]:
+            cv2.floodFill(ff, ff_mask, (sx, sy), 2)
+    outside = ff == 2
 
-    # Retain only the largest connected component (the fisheye circle)
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
-    # Label 0 is the background; find the largest non-background component
-    largest_label = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    mask = (labels == largest_label).astype(np.uint8)
+    yy, xx = np.ogrid[:h, :w]
+    dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
 
+    if outside.sum() < 0.001 * h * w:
+        # No dark border found (not a circular fisheye) — whole frame is valid
+        return np.ones((h, w), dtype=np.uint8)
+
+    # Radius = innermost reach of the outer dark region (1st percentile is robust
+    # to stray pixels), then trimmed slightly to drop the dark vignette edge.
+    radius = float(np.percentile(dist[outside], 1.0)) * (1.0 - erode_frac)
+
+    mask = (dist <= radius).astype(np.uint8)
     return mask
 
 
@@ -279,6 +295,7 @@ def save_depth_visualization(
     valid_mask: np.ndarray | None = None,
     colormap: str = "inferno",
     invert: bool = False,
+    robust_percentiles: tuple[float, float] = (2.0, 98.0),
 ) -> None:
     """Save a colorized depth map as a PNG, optionally side-by-side with the RGB image.
 
@@ -293,6 +310,10 @@ def save_depth_visualization(
         colormap: matplotlib colormap name (default 'inferno').
         invert: reverse the colormap so near pixels are bright (use for metric
                 depth, where near = small value).
+        robust_percentiles: (low, high) percentiles of valid depth used as the
+                colormap range. Clipping outliers (a few very-near/very-far
+                pixels) spreads the colours over the bulk of the scene, giving
+                much better contrast than raw min/max.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -302,6 +323,15 @@ def save_depth_visualization(
     if valid_mask is not None:
         combined_invalid |= ~valid_mask.astype(bool)
     depth_display = ma.array(depth, mask=combined_invalid)
+
+    # Robust colour range from valid pixels → better contrast than raw min/max
+    valid_vals = depth[~combined_invalid]
+    if valid_vals.size:
+        vmin, vmax = np.percentile(valid_vals, robust_percentiles)
+        if vmax <= vmin:
+            vmin, vmax = float(valid_vals.min()), float(valid_vals.max()) or vmin + 1
+    else:
+        vmin, vmax = None, None
 
     cmap = plt.get_cmap(colormap)
     if invert:
@@ -316,13 +346,13 @@ def save_depth_visualization(
         axes[0].imshow(cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB))
         axes[0].set_title("RGB Image", fontsize=13)
         axes[0].axis("off")
-        im = axes[1].imshow(depth_display, cmap=cmap)
+        im = axes[1].imshow(depth_display, cmap=cmap, vmin=vmin, vmax=vmax)
         axes[1].set_title(depth_title, fontsize=13)
         axes[1].axis("off")
         plt.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
     else:
         fig, ax = plt.subplots(figsize=(10, 8))
-        im = ax.imshow(depth_display, cmap=cmap)
+        im = ax.imshow(depth_display, cmap=cmap, vmin=vmin, vmax=vmax)
         ax.set_title(depth_title, fontsize=13)
         ax.axis("off")
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)

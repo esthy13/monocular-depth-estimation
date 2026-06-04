@@ -213,7 +213,14 @@ def main() -> None:
 
     if apply_mask:
         print("Generating fisheye valid-region mask ...")
-        valid_mask = create_fisheye_valid_mask(image)
+        # Use the camera principal point as the lens-circle centre when available
+        K = intrinsics.get(args.sensor, {}).get("K")
+        center = (K[0][2], K[1][2]) if K is not None else None
+        valid_mask = create_fisheye_valid_mask(image, center=center)
+        # Metric models mark unfilled pixels as 0; fold those into the invalid
+        # region so they aren't colored as "nearest" inside the lens circle.
+        if getattr(model, "is_metric", False):
+            valid_mask = (valid_mask.astype(bool) & (depth > 0)).astype(np.uint8)
         n_valid = int(valid_mask.sum())
         print(
             f"Valid pixels: {n_valid} / {valid_mask.size} "

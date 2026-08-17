@@ -40,8 +40,10 @@ choose **File → Upload notebook** in Colab.
    notebook access. Never paste the token into a code cell.
 3. Upload `cv_project_data` to Google Drive.
 4. Select **Runtime → Change runtime type → GPU**.
-5. Edit `DATA_DIR` and `OUTPUT_DIR` in the notebook's settings cell.
-6. Run the one-frame smoke test before enabling its resumable batch cell.
+5. Run all cells. The first dependency setup restarts the Python kernel once;
+   after Colab reconnects, select **Runtime → Run all** again.
+6. Edit `DATA_DIR` and `OUTPUT_DIR` in the notebook's settings cell.
+7. Run the one-frame smoke test before enabling its resumable batch cell.
 
 The notebook pins the official UniDAC source, caches the ~1.4 GB checkpoint in
 Drive, uses the calibrated G1_A/ZED_B camera geometry, and saves metric raw depth

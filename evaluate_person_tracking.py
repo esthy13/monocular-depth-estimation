@@ -195,6 +195,9 @@ def summarize_tracks(rows: list[dict]) -> list[dict]:
         output: dict = {
             "track_id": track_id,
             "detections": len(track_rows),
+            "tracker_assigned": all(
+                bool(row.get("tracker_assigned", True)) for row in track_rows
+            ),
             "first_timestamp_seconds": min(row["timestamp_seconds"] for row in track_rows),
             "last_timestamp_seconds": max(row["timestamp_seconds"] for row in track_rows),
         }
@@ -373,6 +376,7 @@ def main() -> None:
                 "image_file": image_path.name,
                 "timestamp_seconds": timestamp,
                 "track_id": detection.track_id,
+                "tracker_assigned": detection.tracker_assigned,
                 "detector_confidence": detection.confidence,
                 "prediction_model": prediction_label,
                 "depth_inference_ms": float(depth_inference_ms)
@@ -496,6 +500,7 @@ def main() -> None:
 
     zed_rows = [row for row in rows if row.get("zed_count", 0)]
     lidar_rows = [row for row in rows if row.get("lidar_valid")]
+    tracked_rows = [row for row in rows if row.get("tracker_assigned")]
     lidar_3d_rows = [
         row for row in lidar_rows if row.get("lidar_3d_error_m") is not None
     ]
@@ -511,7 +516,9 @@ def main() -> None:
         "processed_frames": processed_frames,
         "missing_depth_predictions": missing_predictions,
         "person_detections": len(rows),
-        "unique_tracks": len({row["track_id"] for row in rows}),
+        "unique_tracks": len({row["track_id"] for row in tracked_rows}),
+        "tracked_detections": len(tracked_rows),
+        "untracked_detections": len(rows) - len(tracked_rows),
         "detections_with_zed_reference": len(zed_rows),
         "detections_with_lidar_reference": len(lidar_rows),
         "mean_detector_inference_ms": float(np.mean(detector_speeds))

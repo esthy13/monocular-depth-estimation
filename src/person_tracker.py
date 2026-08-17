@@ -15,6 +15,7 @@ class PersonDetection:
     confidence: float
     bbox_xyxy: tuple[float, float, float, float]
     mask: np.ndarray
+    tracker_assigned: bool
 
 
 class YOLOPersonTracker:
@@ -98,14 +99,17 @@ class YOLOPersonTracker:
             if track_ids is None:
                 track_id = self._fallback_track_id
                 self._fallback_track_id += 1
+                tracker_assigned = False
             else:
                 track_id = int(track_ids[index])
+                tracker_assigned = True
             detections.append(
                 PersonDetection(
                     track_id=track_id,
                     confidence=float(confidence),
                     bbox_xyxy=tuple(float(value) for value in box),
                     mask=self._instance_mask(result, index, image_bgr.shape[:2]),
+                    tracker_assigned=tracker_assigned,
                 )
             )
         return detections, dict(result.speed or {})

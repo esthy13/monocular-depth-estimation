@@ -38,6 +38,18 @@ class LeastSquaresAlignmentTests(unittest.TestCase):
         self.assertAlmostEqual(result.shift, 0.05)
         self.assertAlmostEqual(result.abs_rel, 0.0)
 
+    def test_inverse_alignment_rejects_degenerate_predictions(self):
+        with self.assertRaisesRegex(ValueError, "degenerate"):
+            align_depth(np.ones(4), np.array([1.0, 2.0, 3.0, 4.0]), "inverse_least_squares")
+
+    def test_inverse_alignment_marks_nonpositive_fitted_inverse_depth_invalid(self):
+        raw = np.array([1.0, 2.0, 3.0])
+        gt = 1.0 / (raw - 0.5)
+        aligned, scale, shift = align_depth(raw, gt, "inverse_least_squares")
+        self.assertGreater(scale, 0)
+        self.assertAlmostEqual(shift, -0.5)
+        np.testing.assert_allclose(aligned, gt)
+
 
 if __name__ == "__main__":
     unittest.main()

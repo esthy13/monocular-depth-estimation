@@ -133,6 +133,12 @@ def parse_args() -> argparse.Namespace:
         help="Maximum RGB-to-LiDAR timestamp difference in seconds.",
     )
     parser.add_argument(
+        "--time_offset",
+        type=float,
+        default=0.0,
+        help="Seconds added to LiDAR timestamps before matching (positive means LiDAR clock lags camera).",
+    )
+    parser.add_argument(
         "--extrinsics_convention",
         choices=["sensor_to_reference", "reference_to_sensor"],
         default="sensor_to_reference",
@@ -142,7 +148,7 @@ def parse_args() -> argparse.Namespace:
         "--alignment",
         choices=["auto", "none", "median", "least_squares", "inverse_least_squares"],
         default="auto",
-        help="Metric alignment for sparse LiDAR evaluation. 'auto' uses least-squares scaling for relative models.",
+        help="Metric alignment. 'auto' fits affine inverse depth per frame for relative Depth Anything models.",
     )
     parser.add_argument("--debug_evaluation", action="store_true", help="Write per-frame LiDAR/depth diagnostics to CSV.")
     parser.add_argument("--plot_evaluation", action="store_true", help="Save evaluation plots under outputs/evaluation_plots/.")
@@ -177,6 +183,7 @@ def main() -> None:
         save_metrics,
         save_point_samples,
         save_projection_overlay,
+        save_evaluation_visualization,
         transform_points,
         align_depth,
     )
@@ -226,7 +233,9 @@ def main() -> None:
     lidar_pairs: dict[Path, Path] = {}
     if args.evaluate_lidar:
         lidar_files = find_sensor_npy_files(args.data_dir, args.lidar_sensor, args.recording)
-        lidar_pairs = dict(match_by_timestamp(requested_images, lidar_files, max_dt=args.max_lidar_dt))
+        lidar_pairs = dict(match_by_timestamp(
+            requested_images, lidar_files, max_dt=args.max_lidar_dt, time_offset=args.time_offset
+        ))
         if batch_lidar:
             print(f"LiDAR matches: {len(lidar_pairs)} / {len(requested_images)} images within {args.max_lidar_dt:.3f}s")
             requested_images = [path for path in requested_images if path in lidar_pairs]
@@ -276,8 +285,11 @@ def main() -> None:
     alignment = args.alignment
     if alignment == "auto":
         alignment = "none" if getattr(model, "is_metric", False) else "inverse_least_squares"
+    print(f"Evaluation alignment: {alignment} ({'metric input' if getattr(model, 'is_metric', False) else 'raw inverse-depth-like input'})")
     T_camera_lidar = camera_from_lidar_transform(extrinsics, args.sensor, args.lidar_sensor, args.extrinsics_convention) if args.evaluate_lidar else None
-    global_predictions, global_ground_truth, debug_rows, frame_results = [], [], [], []
+    if T_camera_lidar is not None:
+        print("T_camera_lidar (P_camera = T_camera_lidar @ P_lidar):\n", T_camera_lidar)
+    global_aligned_predictions, global_ground_truth, debug_rows, frame_results = [], [], [], []
 
     for image_path in requested_images:
         image = cv2.imread(str(image_path))
@@ -306,14 +318,22 @@ def main() -> None:
         if not args.evaluate_lidar:
             continue
         lidar_path = lidar_pairs[image_path]
+        stored_lidar = np.asarray(np.load(lidar_path, mmap_mode="r"))
+        stored_lidar_count = int(len(stored_lidar))
         raw_lidar_points = load_lidar_points(lidar_path)
+        invalid_lidar_points = stored_lidar_count - len(raw_lidar_points)
         points_camera = transform_points(raw_lidar_points, T_camera_lidar)
         front_count = int(np.count_nonzero(np.isfinite(points_camera).all(axis=1) & (points_camera[:, 2] > 0)))
         pixels, lidar_depth, _ = project_perspective_points(points_camera, intrinsics[args.sensor], image.shape[:2])
+        projected_count = len(pixels)
         nearest = keep_nearest_per_pixel(pixels, lidar_depth)
         pixels, lidar_depth = pixels[nearest], lidar_depth[nearest]
         sampled_prediction = sample_bilinear(depth, pixels) if len(pixels) else np.empty(0)
-        valid = np.isfinite(sampled_prediction) & (sampled_prediction > 0) & np.isfinite(lidar_depth) & (lidar_depth > 0)
+        invalid_prediction_mask = ~np.isfinite(sampled_prediction) | (sampled_prediction <= 0)
+        invalid_lidar_mask = ~np.isfinite(lidar_depth) | (lidar_depth <= 0)
+        valid = ~invalid_prediction_mask & ~invalid_lidar_mask
+        invalid_prediction_points = int(np.count_nonzero(invalid_prediction_mask & ~invalid_lidar_mask))
+        invalid_projected_lidar_points = int(np.count_nonzero(invalid_lidar_mask))
         pixels, lidar_depth, sampled_prediction = pixels[valid], lidar_depth[valid], sampled_prediction[valid]
         if len(sampled_prediction) < 2:
             print("Skipping frame: fewer than two valid projected LiDAR samples.")
@@ -324,11 +344,19 @@ def main() -> None:
         prediction_proxy = sampled_prediction
         result = evaluate_depth(prediction_proxy, lidar_depth, alignment)
         aligned_prediction, _, _ = align_depth(prediction_proxy, lidar_depth, alignment)
+        aligned_valid = np.isfinite(aligned_prediction) & (aligned_prediction > 0)
+        excluded_after_alignment = int(np.count_nonzero(~aligned_valid))
+        metric_pixels = pixels[aligned_valid]
+        metric_lidar_depth = lidar_depth[aligned_valid]
+        metric_prediction_proxy = prediction_proxy[aligned_valid]
+        metric_aligned_prediction = aligned_prediction[aligned_valid]
         save_projection_overlay(image, pixels, lidar_depth, output_dir / f"{stem}_lidar_projection.png")
-        save_metrics(output_dir / f"{stem}_lidar_metrics.json", result, image=str(image_path), lidar_cloud=str(lidar_path), camera_sensor=args.sensor, lidar_sensor=args.lidar_sensor, timestamp_tolerance_s=args.max_lidar_dt, extrinsics_convention=args.extrinsics_convention, prediction_representation=("metric_depth_m" if getattr(model, "is_metric", False) else "reciprocal_relative_depth"))
-        save_point_samples(output_dir / f"{stem}_lidar_samples.csv", pixels, lidar_depth, prediction_proxy, aligned_prediction)
-        global_predictions.append(prediction_proxy)
-        global_ground_truth.append(lidar_depth)
+        if args.debug_evaluation or args.plot_evaluation:
+            save_evaluation_visualization(image, depth, metric_pixels, metric_lidar_depth, metric_aligned_prediction, output_dir / f"{stem}_evaluation_panels.png")
+        save_metrics(output_dir / f"{stem}_lidar_metrics.json", result, image=str(image_path), lidar_cloud=str(lidar_path), camera_sensor=args.sensor, lidar_sensor=args.lidar_sensor, timestamp_tolerance_s=args.max_lidar_dt, time_offset_s=args.time_offset, extrinsics_convention=args.extrinsics_convention, prediction_representation=("metric_depth_m" if getattr(model, "is_metric", False) else "raw_relative_inverse_depth"), alignment_scope="per_frame", invalid_prediction_points=invalid_prediction_points, invalid_lidar_points=invalid_lidar_points + invalid_projected_lidar_points, excluded_after_alignment=excluded_after_alignment)
+        save_point_samples(output_dir / f"{stem}_lidar_samples.csv", metric_pixels, metric_lidar_depth, metric_prediction_proxy, metric_aligned_prediction)
+        global_aligned_predictions.append(metric_aligned_prediction)
+        global_ground_truth.append(metric_lidar_depth)
         frame_results.append(result)
         if args.debug_evaluation or args.plot_evaluation:
             raw_finite = depth[np.isfinite(depth)]
@@ -337,29 +365,44 @@ def main() -> None:
             row = {
                 "frame": image_index, "image": image_path.name, "lidar_cloud": lidar_path.name,
                 "camera_timestamp": parse_timestamp(image_path), "lidar_timestamp": parse_timestamp(lidar_path),
-                "timestamp_difference_s": parse_timestamp(lidar_path) - parse_timestamp(image_path),
-                "raw_lidar_points": len(raw_lidar_points), "front_camera_points": front_count,
-                "projected_points": len(nearest), "valid_projected_points": len(prediction_proxy),
+                "timestamp_difference_s": parse_timestamp(lidar_path) + args.time_offset - parse_timestamp(image_path),
+                "raw_lidar_points": stored_lidar_count, "front_camera_points": front_count,
+                "projected_points": projected_count, "unique_projected_points": len(nearest), "valid_projected_points": result.count,
                 "zero_predictions": int(np.count_nonzero(depth == 0)), "negative_predictions": int(np.count_nonzero(depth < 0)),
-                "invalid_predictions": int(np.count_nonzero(~np.isfinite(depth))), "invalid_lidar_points": int(len(raw_lidar_points) - len(load_lidar_points(lidar_path))),
+                "invalid_predictions": int(np.count_nonzero(~np.isfinite(depth))),
+                "invalid_prediction_points": invalid_prediction_points + excluded_after_alignment,
+                "invalid_lidar_points": invalid_lidar_points + invalid_projected_lidar_points,
                 "camera_x_min": float(np.min(points_camera[:, 0])), "camera_x_max": float(np.max(points_camera[:, 0])),
                 "camera_y_min": float(np.min(points_camera[:, 1])), "camera_y_max": float(np.max(points_camera[:, 1])),
                 "camera_z_min": float(np.min(points_camera[:, 2])), "camera_z_max": float(np.max(points_camera[:, 2])),
                 "alignment_scale": result.scale, "alignment_shift": result.shift, "mae_m": result.mae_m, "rmse_m": result.rmse_m, "abs_rel": result.abs_rel,
-                **summary(lidar_depth, "lidar_depth"), **summary(prediction_proxy, "raw_prediction"), **summary(aligned_prediction, "aligned_prediction"),
+                **summary(metric_lidar_depth, "lidar_depth"), **summary(raw_finite, "raw_prediction_image"),
+                **summary(metric_prediction_proxy, "raw_prediction_sampled"), **summary(metric_aligned_prediction, "aligned_prediction"),
             }
             debug_rows.append(row)
+        if result.abs_rel >= .9:
+            rng = np.random.default_rng(image_index)
+            selected = rng.choice(result.count, size=min(20, result.count), replace=False)
+            print("AbsRel >= 0.9 diagnostic samples (gt, raw, aligned, abs_error, rel_error):")
+            for idx in selected:
+                gt, raw, pred = metric_lidar_depth[idx], metric_prediction_proxy[idx], metric_aligned_prediction[idx]
+                print(f"  {gt:.4f}, {raw:.6g}, {pred:.4f}, {abs(pred-gt):.4f}, {abs(pred-gt)/gt:.4f}")
         print(f"LiDAR metrics ({result.count} points): MAE={result.mae_m:.3f} m, RMSE={result.rmse_m:.3f} m, AbsRel={result.abs_rel:.3f}")
 
-    if batch_lidar and global_predictions:
-        global_result = evaluate_depth(np.concatenate(global_predictions), np.concatenate(global_ground_truth), alignment)
+    if batch_lidar and global_aligned_predictions:
+        # Relative monocular outputs have arbitrary scale/shift per image. Aggregate
+        # the already per-frame-aligned metric predictions; do not silently refit a
+        # second, recording-wide transform with different semantics.
+        global_result = evaluate_depth(np.concatenate(global_aligned_predictions), np.concatenate(global_ground_truth), "none")
         global_path = output_dir / f"{args.recording}_{args.sensor}_{args.lidar_sensor}_lidar_global_metrics.json"
         def frame_stat(attribute: str) -> dict[str, float]:
             values = np.array([getattr(result, attribute) for result in frame_results])
             return {f"mean_frame_{attribute}": float(values.mean()), f"median_frame_{attribute}": float(np.median(values)), f"std_frame_{attribute}": float(values.std())}
         abs_rel = np.array([result.abs_rel for result in frame_results])
-        save_metrics(global_path, global_result, camera_sensor=args.sensor, lidar_sensor=args.lidar_sensor, recording=args.recording, evaluated_frames=len(global_predictions), matched_images=len(lidar_pairs), timestamp_tolerance_s=args.max_lidar_dt, extrinsics_convention=args.extrinsics_convention, alignment_scope="single inverse-depth affine fit across all valid LiDAR samples", **frame_stat("mae_m"), **frame_stat("rmse_m"), **frame_stat("abs_rel"), frames_abs_rel_lt_025=float(np.mean(abs_rel < .25)), frames_abs_rel_lt_05=float(np.mean(abs_rel < .5)), frames_abs_rel_ge_09=float(np.mean(abs_rel >= .9)))
-        print(f"\nGlobal LiDAR metrics ({global_result.count} points across {len(global_predictions)} frames): MAE={global_result.mae_m:.3f} m, RMSE={global_result.rmse_m:.3f} m, AbsRel={global_result.abs_rel:.3f}")
+        dt = np.array([parse_timestamp(lidar_pairs[path]) + args.time_offset - parse_timestamp(path) for path in requested_images])
+        save_metrics(global_path, global_result, camera_sensor=args.sensor, lidar_sensor=args.lidar_sensor, recording=args.recording, evaluated_frames=len(global_aligned_predictions), matched_images=len(lidar_pairs), timestamp_tolerance_s=args.max_lidar_dt, time_offset_s=args.time_offset, extrinsics_convention=args.extrinsics_convention, alignment_method=alignment, alignment_scope="per-frame alignment; point-weighted aggregation without refitting", timestamp_dt_min_s=float(dt.min()), timestamp_dt_max_s=float(dt.max()), timestamp_dt_mean_s=float(dt.mean()), timestamp_dt_median_s=float(np.median(dt)), timestamp_dt_std_s=float(dt.std()), **frame_stat("mae_m"), **frame_stat("rmse_m"), **frame_stat("abs_rel"), frames_abs_rel_lt_025=float(np.mean(abs_rel < .25)), frames_abs_rel_lt_05=float(np.mean(abs_rel < .5)), frames_abs_rel_ge_09=float(np.mean(abs_rel >= .9)))
+        print(f"\nTimestamp dt (LiDAR + offset - camera): min={dt.min():.6f}, max={dt.max():.6f}, mean={dt.mean():.6f}, median={np.median(dt):.6f}, std={dt.std():.6f} s")
+        print(f"Global LiDAR metrics ({global_result.count} points across {len(global_aligned_predictions)} frames): MAE={global_result.mae_m:.3f} m, RMSE={global_result.rmse_m:.3f} m, AbsRel={global_result.abs_rel:.3f}")
         print(f"Saved global metrics: {global_path}")
 
     if args.debug_evaluation and debug_rows:
@@ -370,16 +413,17 @@ def main() -> None:
             writer.writerows(debug_rows)
         print(f"Saved evaluation debug: {debug_path}")
 
-    if args.plot_evaluation and debug_rows and global_predictions:
+    if args.plot_evaluation and debug_rows and global_aligned_predictions:
         import matplotlib.pyplot as plt
 
         plot_dir = output_dir / "evaluation_plots"
         plot_dir.mkdir(exist_ok=True)
+        plot_prefix = f"{args.recording}_{args.sensor}_{args.lidar_sensor}_"
         frame = np.array([row["frame"] for row in debug_rows])
         def line_plot(column: str, title: str, ylabel: str) -> None:
             plt.figure(figsize=(9, 4)); plt.plot(frame, [row[column] for row in debug_rows], marker=".")
             plt.xlabel("frame number"); plt.ylabel(ylabel); plt.title(title); plt.grid(); plt.tight_layout()
-            plt.savefig(plot_dir / f"{column}.png", dpi=150); plt.close()
+            plt.savefig(plot_dir / f"{plot_prefix}{column}.png", dpi=150); plt.close()
         line_plot("mae_m", "MAE vs frame", "MAE (m)")
         line_plot("rmse_m", "RMSE vs frame", "RMSE (m)")
         line_plot("abs_rel", "AbsRel vs frame", "AbsRel")
@@ -387,17 +431,16 @@ def main() -> None:
         line_plot("timestamp_difference_s", "LiDAR − camera timestamp vs frame", "seconds")
         line_plot("alignment_scale", "Alignment scale vs frame", "scale")
         line_plot("alignment_shift", "Alignment shift vs frame", "shift")
-        raw, gt = np.concatenate(global_predictions), np.concatenate(global_ground_truth)
-        aligned, _, _ = align_depth(raw, gt, alignment)
+        aligned, gt = np.concatenate(global_aligned_predictions), np.concatenate(global_ground_truth)
         valid = np.isfinite(aligned) & (aligned > 0)
         upper = np.percentile(np.r_[gt[valid], aligned[valid]], 99)
         plt.figure(figsize=(5, 5)); plt.scatter(gt[valid], aligned[valid], s=1, alpha=.08)
         plt.plot([0, upper], [0, upper], "r--", label="y = x"); plt.xlim(0, upper); plt.ylim(0, upper)
         plt.xlabel("LiDAR depth (m)"); plt.ylabel("aligned prediction (m)"); plt.legend(); plt.tight_layout()
-        plt.savefig(plot_dir / "depth_scatter.png", dpi=150); plt.close()
+        plt.savefig(plot_dir / f"{plot_prefix}depth_scatter.png", dpi=150); plt.close()
         plt.figure(figsize=(7, 4)); plt.hist(np.abs(aligned[valid] - gt[valid]), bins=100)
         plt.xlabel("absolute error (m)"); plt.ylabel("count"); plt.title("Absolute error histogram"); plt.tight_layout()
-        plt.savefig(plot_dir / "absolute_error_histogram.png", dpi=150); plt.close()
+        plt.savefig(plot_dir / f"{plot_prefix}absolute_error_histogram.png", dpi=150); plt.close()
         print(f"Saved evaluation plots: {plot_dir}")
 
 

@@ -67,7 +67,54 @@ The script grabbed the chronologically matching LiDAR file (0000000012_...npy), 
 * **AbsRel (Absolute Relative Error) = 0.709**: The average relative error is **70.9%**. This is a very high value, which typically means the monocular model's relative depth has not been properly scaled or calibrated to the actual metric scale of the LiDAR yet.
 
 # Changelog:
-I should try adding **a scale alignment step (like Least Squares scaling) between the AI map and the LiDAR points before calculating metrics**. This could reduce the error, that right now is too high --> implemented, the absolute error and the MAE are consistently reduced
+1. I should try adding **a scale alignment step (like Least Squares scaling) between the AI map and the LiDAR points before calculating metrics**. This could reduce the error, that right now is too high --> implemented, the absolute error and the MAE are consistently reduced
 
-I implemented a batch method to evaluate all images, note that 66 of 68 RGB frames have an E1_A match within 50 ms (the images that do not match within 50 ms with the lidar sensor are going to be excluded, I think)
+2. I implemented a batch method to evaluate all images, note that 66 of 68 RGB frames have an E1_A match within 50 ms (the images that do not match within 50 ms with the lidar sensor are going to be excluded, I think) --> absolute error is too big
+
+3.  Implemented and verified. The systematic MAE≈4.5 m / AbsRel≈1.0 pattern was caused by incorrect relative-depth alignment, not Depth Anything V2 accuracy.
+
+  ### Confirmed root cause
+
+  Depth Anything V2 Small is a relative-depth model; its raw output is inverse-depth/disparity-like, not metres (official
+  model card (https://huggingface.co/depth-anything/Depth-Anything-V2-Small-hf), Transformers documentation
+  (https://huggingface.co/docs/transformers/main/model_doc/depth_anything_v2)).
+
+  The previous pipeline performed:
+
+  distance_proxy = 1 / raw_prediction
+  depth_metric = scale * distance_proxy
+
+  This is mathematically insufficient because relative inverse depth has both scale and shift ambiguity. Raw values close
+  to zero became enormous after reciprocal conversion, driving the least-squares scale to approximately 10⁻⁹. Almost every
+  resulting metric prediction was therefore near zero:
+
+  abs(pred - gt) / gt ≈ abs(0 - gt) / gt ≈ 1
+
+  That directly explains the repeated AbsRel≈1 and MAE near the dataset’s mean LiDAR depth.
+
+  The corrected formulation is:
+
+  inverse_depth_metric = a * raw_prediction + b
+  depth_metric = 1 / inverse_depth_metric
+
+  Only finite, positive fitted inverse depths are evaluated.
+
+  ### Changes
+
+  - Corrected and hardened inverse-depth affine alignment in src/lidar_evaluation.py:114.
+  - Made --alignment auto explicitly select per-frame inverse-depth alignment for Depth Anything V2 in run_depth.py:285.
+  - Prevented recording-wide metrics from silently fitting a second, semantically different alignment. Global metrics now
+    aggregate already per-frame-aligned predictions in run_depth.py:392.
+
+  - Added explicit validation for NaN, Inf, zero, negative, degenerate fits, nonpositive scale, and nonpositive aligned
+    inverse depth.
+
+  - Added separate invalid LiDAR, invalid sampled prediction, and post-alignment exclusion counts.
+  - Added full per-frame diagnostic CSV output, camera-coordinate ranges, timestamp statistics, prediction distributions,
+    alignment parameters, and 20 reproducible samples for frames with AbsRel≥0.9.
+
+  - Added --time_offset, without changing the default timestamp tolerance or applying an unsupported offset.
+  - Added four-panel RGB/LiDAR/prediction overlays and recording-prefixed evaluation plots.
+  - Point CSVs now include absolute and relative errors.
+  - Added alignment and timestamp-offset tests.
 

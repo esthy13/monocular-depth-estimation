@@ -119,26 +119,39 @@ def align_depth(predicted: np.ndarray, ground_truth: np.ndarray, method: str) ->
     ``sum((scale * predicted - ground_truth) ** 2)``. Parameters are fitted on
     these points, so they must be reported with every result.
     """
+    predicted = np.asarray(predicted, dtype=np.float64)
+    ground_truth = np.asarray(ground_truth, dtype=np.float64)
+    valid = np.isfinite(predicted) & (predicted > 0) & np.isfinite(ground_truth) & (ground_truth > 0)
+    if np.count_nonzero(valid) < 2:
+        raise ValueError("Alignment needs at least two finite, positive prediction/ground-truth pairs.")
+    fit_prediction, fit_ground_truth = predicted[valid], ground_truth[valid]
     if method == "none":
         return predicted.copy(), 1.0, 0.0
     if method == "median":
-        scale = float(np.median(ground_truth) / np.median(predicted))
+        scale = float(np.median(fit_ground_truth) / np.median(fit_prediction))
+        if not np.isfinite(scale) or scale <= 0:
+            raise ValueError("Median alignment produced a non-positive or non-finite scale.")
         return predicted * scale, scale, 0.0
     if method == "least_squares":
-        denominator = float(np.dot(predicted, predicted))
+        denominator = float(np.dot(fit_prediction, fit_prediction))
         if not np.isfinite(denominator) or denominator <= 0:
             raise ValueError("Least-squares alignment needs finite, non-zero predicted depths.")
-        scale = float(np.dot(predicted, ground_truth) / denominator)
+        scale = float(np.dot(fit_prediction, fit_ground_truth) / denominator)
+        if not np.isfinite(scale) or scale <= 0:
+            raise ValueError("Least-squares alignment produced a non-positive or non-finite scale.")
         return predicted * scale, scale, 0.0
     if method == "inverse_least_squares":
         # Depth Anything V2's relative head produces an inverse-depth-like
         # quantity. Fit 1 / Z = a * prediction + b, then invert only the
         # fitted positive inverse depths. Inverting raw values first is
         # unstable: a valid raw value close to zero becomes an enormous outlier.
-        inverse_ground_truth = 1.0 / ground_truth
-        scale, shift = np.linalg.lstsq(
-            np.column_stack((predicted, np.ones(len(predicted)))), inverse_ground_truth, rcond=None
-        )[0]
+        inverse_ground_truth = 1.0 / fit_ground_truth
+        design = np.column_stack((fit_prediction, np.ones(len(fit_prediction))))
+        if np.linalg.matrix_rank(design) < 2:
+            raise ValueError("Inverse-depth alignment is degenerate (prediction has no usable variation).")
+        scale, shift = np.linalg.lstsq(design, inverse_ground_truth, rcond=None)[0]
+        if not np.isfinite(scale) or not np.isfinite(shift) or scale <= 0:
+            raise ValueError("Inverse-depth alignment produced invalid parameters.")
         inverse_predicted = predicted * scale + shift
         aligned = np.divide(
             1.0, inverse_predicted, out=np.full(len(predicted), np.nan), where=inverse_predicted > 0
@@ -180,9 +193,9 @@ def save_point_samples(path: Path, pixels: np.ndarray, lidar_depth: np.ndarray, 
     """Save pointwise values in a portable CSV for plotting and audit."""
     with Path(path).open("w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(("u_px", "v_px", "lidar_depth_m", "prediction_proxy", "aligned_prediction_m", "error_m"))
+        writer.writerow(("u_px", "v_px", "lidar_depth_m", "prediction_proxy", "aligned_prediction_m", "absolute_error_m", "relative_error"))
         for pixel, gt, raw, metric in zip(pixels, lidar_depth, predicted, aligned):
-            writer.writerow((pixel[0], pixel[1], gt, raw, metric, metric - gt))
+            writer.writerow((pixel[0], pixel[1], gt, raw, metric, abs(metric - gt), abs(metric - gt) / gt))
 
 
 def save_metrics(path: Path, result: EvaluationResult, **metadata: object) -> None:
@@ -201,3 +214,31 @@ def save_projection_overlay(image: np.ndarray, pixels: np.ndarray, depths: np.nd
         for (u, v), colour in zip(np.rint(pixels).astype(int), colours):
             cv2.circle(overlay, (u, v), 2, tuple(map(int, colour[0])), -1, lineType=cv2.LINE_AA)
     cv2.imwrite(str(path), overlay)
+
+
+def save_evaluation_visualization(
+    image: np.ndarray,
+    raw_prediction: np.ndarray,
+    pixels: np.ndarray,
+    lidar_depth: np.ndarray,
+    aligned_prediction: np.ndarray,
+    path: Path,
+) -> None:
+    """Save RGB, LiDAR projection, prediction, and prediction/LiDAR overlay panels."""
+    from src.utils import colorize_depth
+
+    prediction_rgb = colorize_depth(raw_prediction)
+    prediction_bgr = cv2.cvtColor(prediction_rgb, cv2.COLOR_RGB2BGR)
+    lidar_overlay = image.copy()
+    prediction_overlay = prediction_bgr.copy()
+    if len(pixels):
+        lo, hi = np.percentile(lidar_depth, (2, 98))
+        normalized = np.clip((lidar_depth - lo) / max(hi - lo, 1e-6), 0, 1)
+        colours = cv2.applyColorMap((normalized * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
+        for (u, v), colour in zip(np.rint(pixels).astype(int), colours):
+            point_colour = tuple(map(int, colour[0]))
+            cv2.circle(lidar_overlay, (u, v), 2, point_colour, -1, lineType=cv2.LINE_AA)
+            cv2.circle(prediction_overlay, (u, v), 2, point_colour, -1, lineType=cv2.LINE_AA)
+    top = np.hstack((image, lidar_overlay))
+    bottom = np.hstack((prediction_bgr, prediction_overlay))
+    cv2.imwrite(str(path), np.vstack((top, bottom)))

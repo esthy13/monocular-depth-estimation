@@ -156,13 +156,15 @@ def match_by_timestamp(
     source_files: list[Path],
     target_files: list[Path],
     max_dt: float = 0.05,
+    time_offset: float = 0.0,
 ) -> list[tuple[Path, Path]]:
     """Pair each source file with the nearest-timestamp target file.
 
-    Returns only pairs where |ts_source - ts_target| <= max_dt seconds.
+    ``time_offset`` is added to target (LiDAR) timestamps before matching.
+    Returns only pairs where ``|ts_source - (ts_target + time_offset)| <= max_dt``.
     """
     target_ts_pairs = sorted(
-        (parse_timestamp(f), f) for f in target_files
+        (parse_timestamp(f) + time_offset, f) for f in target_files
     )
     target_ts = [t for t, _ in target_ts_pairs]
     target_fs = [f for _, f in target_ts_pairs]

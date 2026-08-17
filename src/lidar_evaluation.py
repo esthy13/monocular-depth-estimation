@@ -72,7 +72,9 @@ def project_perspective_points(
         return np.empty((0, 2)), np.empty(0), indices
     K = np.asarray(camera["K"], dtype=np.float64)
     dist = np.asarray(camera.get("dist", camera.get("d", [])), dtype=np.float64)
-    pixels, _ = cv2.projectPoints(points_camera[indices], np.zeros(3), np.zeros(3), K, dist)
+    # OpenCV rejects integer point arrays; projection is intrinsically floating point.
+    visible_points = np.asarray(points_camera[indices], dtype=np.float64)
+    pixels, _ = cv2.projectPoints(visible_points, np.zeros(3), np.zeros(3), K, dist)
     pixels = pixels.reshape(-1, 2)
     depths = points_camera[indices, 2]
     inside = (

@@ -1,25 +1,37 @@
 # monocular-depth-estimation
 
+Metric monocular depth, calibrated 3D person localization, and tracking for the
+G1_A fisheye camera, evaluated against ZED stereo and two LiDAR sensors.
+
+Detailed instructions and methodology:
+
+- [Experiment and execution guide](docs/EXPERIMENT_GUIDE.md)
+- [Camera geometry used by each model](docs/MODEL_GEOMETRY.md)
+
 ## Repository structure
 
 ```md
 monocular-depth-estimation/
+├── docs/                       # experiment and geometry documentation
+├── notebooks/                  # Colab GPU workflow
+├── src/                        # models, geometry, tracking, and evaluation
+├── tests/                      # regression tests
 ├── minutes/
-└── references/
-    └── res.bib
+├── references/
+├── run_depth.py                # single-frame depth inference
+├── evaluate_person_tracking.py # 3D person/sensor evaluation
+└── compare_evaluation_runs.py  # UniDAC/DAC report table
 ```
 
-# To start the project
-Check that you have python 3.12 and uv installed on your machine already, then create
-and start a virtual environment: 
+## Local setup
+
+Install Python 3.12 and `uv`, then create the locked environment:
+
 ```bash
-uv venv
-source .venv/bin/activate
+uv sync --locked
 ```
-How to add dependencies to the project:
-```
-uv add torch
-```
+
+Run commands with `uv run python ...`; manual activation is optional.
 
 ## Google Colab: UniDAC on GPU
 
@@ -77,8 +89,11 @@ resolving the standing person and the hallway structure.
 | --- | --- |
 | ![Fisheye — Depth Anything V2](docs/images/fisheye_depth_anything_v2.png) | ![Fisheye — DAC indoor ResNet101](docs/images/fisheye_dac_indoor_resnet101.png) |
 
-**Takeaway:** use Depth Anything V2 for the perspective camera (sharpest), and
-DAC `dac-indoor-resnet101` for the fisheye camera (handles distortion + metric scale).
+**Current baseline:** Depth Anything V2 is the sharp perspective-camera
+visual baseline, while DAC is the established calibrated metric baseline for
+G1_A. UniDAC is the newer metric candidate used by the automated evaluation.
+The final recommendation must come from the same-frame DAC/UniDAC sensor
+comparison rather than these qualitative images.
 
 ## Running monocular depth estimation
 
@@ -96,8 +111,8 @@ fisheye camera — a binary valid-region mask (`_mask.png`).
 # Perspective camera (ZED_B) — Depth Anything V2 gives the sharpest result
 uv run python run_depth.py --data_dir ../ --sensor ZED_B --recording recording1 --image_index 0
 
-# Fisheye camera (G1_A) — DAC indoor ResNet101 is the best for this indoor data
-uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 --image_index 0 --model dac --variant dac-indoor-resnet101
+# Fisheye camera (G1_A) — calibrated metric DAC baseline with a fixed report scale
+uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 --image_index 0 --model dac --variant dac-indoor-resnet101 --visualization_range 0.5 10.0
 ```
 
 > **Note on units.** Depth Anything V2 outputs *relative* (inverse) depth in
@@ -165,7 +180,7 @@ uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 -
 
 ## 3D person tracking and physical-sensor evaluation
 
-After generating a G1_A UniDAC batch, run the automated evaluator:
+After generating a G1_A metric-depth batch, run the automated evaluator:
 
 ```bash
 uv run python evaluate_person_tracking.py \
@@ -182,7 +197,7 @@ The evaluator uses the COCO-pretrained
 for person masks and [ByteTrack](https://docs.ultralytics.com/modes/track/) for
 persistent IDs. For every tracked person it:
 
-1. takes robust metric UniDAC depth inside an eroded instance mask;
+1. takes robust metric model depth inside an eroded instance mask;
 2. converts the mask centroid and Euclidean ray depth to G1_A camera-frame XYZ;
 3. reprojects the closest ZED_B depth image through the calibrated extrinsics;
 4. reprojects the two closest LiDAR sweeps and rejects returns inconsistent
@@ -194,10 +209,22 @@ Outputs are written to the evaluation directory:
 - `person_measurements.csv`: one row per detected person and frame;
 - `track_summary.csv`: aggregate measurements per persistent track ID;
 - `evaluation_summary.json`: run configuration, versions, counts, and averages;
-- `annotated/`: masks, boxes, IDs, and UniDAC/ZED/LiDAR distances.
+- `annotated/`: masks, boxes, IDs, and model/ZED/LiDAR distances.
 
 The updated Colab notebook exposes the same workflow in its optional final
 section and caches `yolo26n-seg.pt` in Google Drive.
+
+To compare evaluation summaries from UniDAC and DAC using the same protocol:
+
+```bash
+uv run python compare_evaluation_runs.py \
+  --run UniDAC=/path/to/unidac/evaluation_summary.json \
+  --run DAC=/path/to/dac/evaluation_summary.json \
+  --output_markdown outputs/evaluation/model_comparison.md
+```
+
+See the [experiment guide](docs/EXPERIMENT_GUIDE.md) for the complete sampling,
+timing, visualization, and reporting protocol.
 
 ## All depth-estimation options
 
@@ -211,7 +238,8 @@ uv run python run_depth.py \
   --variant dac-indoor-resnet101 \ # only with --model dac
   --encoder {small|base|large} \   # only for depth_anything_v2
   --fisheye_mask {auto|none} \     # auto-masks the lens circle on fisheye
-  --invalid_value {nan|zero}       # value written to masked pixels
+  --invalid_value {nan|zero} \     # value written to masked pixels
+  --visualization_range 0.5 10.0   # shared report scale; optional
 ```
 
 - Omit `--model` to use the default `depth_anything_v2`.

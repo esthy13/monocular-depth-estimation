@@ -108,6 +108,18 @@ def parse_args() -> argparse.Namespace:
         choices=["nan", "zero"],
         help="Value written to invalid (masked) depth pixels (default: nan).",
     )
+    parser.add_argument(
+        "--visualization_range",
+        type=float,
+        nargs=2,
+        metavar=("MIN", "MAX"),
+        default=None,
+        help=(
+            "Fixed colorbar range in the selected model's output units. Use the "
+            "same range for every image in a visual comparison. When omitted, "
+            "each image uses robust automatic limits."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -263,6 +275,10 @@ def main() -> None:
     save_depth_visualization(
         depth, vis_path, rgb_image=image, valid_mask=valid_mask,
         invert=getattr(model, "is_metric", False),
+        value_range=tuple(args.visualization_range)
+        if args.visualization_range is not None
+        else None,
+        depth_unit="m" if getattr(model, "is_metric", False) else "a.u.",
     )
     print(f"Saved visualization:  {vis_path}")
 

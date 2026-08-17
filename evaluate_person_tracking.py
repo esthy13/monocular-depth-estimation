@@ -54,6 +54,14 @@ def parse_args() -> argparse.Namespace:
         help="Maximum frames to evaluate; 0 evaluates every available prediction.",
     )
     parser.add_argument("--frame_step", type=int, default=1)
+    parser.add_argument(
+        "--prediction_label",
+        default=None,
+        help=(
+            "Name shown for the monocular prediction. By default it is read "
+            "from each prediction metadata file."
+        ),
+    )
     parser.add_argument("--detector_weights", default="yolo26n-seg.pt")
     parser.add_argument("--detector_confidence", type=float, default=0.25)
     parser.add_argument("--detector_iou", type=float, default=0.7)
@@ -108,6 +116,7 @@ def annotate_detection(
     bbox: tuple[float, float, float, float],
     track_id: int,
     confidence: float,
+    prediction_label: str,
     prediction_m: float | None,
     zed_m: float | None,
     lidar_m: float | None,
@@ -121,7 +130,7 @@ def annotate_detection(
     cv2.rectangle(image, (x1, y1), (x2, y2), color, 3)
     parts = [f"ID {track_id}", f"conf {confidence:.2f}"]
     if prediction_m is not None:
-        parts.append(f"UniDAC {prediction_m:.2f}m")
+        parts.append(f"{prediction_label} {prediction_m:.2f}m")
     if zed_m is not None:
         parts.append(f"ZED {zed_m:.2f}m")
     if lidar_m is not None:
@@ -256,6 +265,8 @@ def main() -> None:
     missing_predictions = 0
     processed_frames = 0
     detector_speeds: list[float] = []
+    depth_inference_times: list[float] = []
+    prediction_models: set[str] = set()
     project_commits: set[str] = set()
 
     for image_index in indices:
@@ -281,6 +292,13 @@ def main() -> None:
         metadata = json.loads(metadata_path.read_text()) if metadata_path.is_file() else {}
         if metadata.get("project_commit"):
             project_commits.add(str(metadata["project_commit"]))
+        prediction_label = str(
+            args.prediction_label or metadata.get("model") or "Prediction"
+        )
+        prediction_models.add(prediction_label)
+        depth_inference_ms = metadata.get("median_time_ms")
+        if depth_inference_ms is not None:
+            depth_inference_times.append(float(depth_inference_ms))
         timestamp = float(metadata.get("timestamp_seconds") or parse_timestamp(image_path))
 
         detections, speed = tracker.track(image)
@@ -356,6 +374,10 @@ def main() -> None:
                 "timestamp_seconds": timestamp,
                 "track_id": detection.track_id,
                 "detector_confidence": detection.confidence,
+                "prediction_model": prediction_label,
+                "depth_inference_ms": float(depth_inference_ms)
+                if depth_inference_ms is not None
+                else None,
                 "bbox_x1": detection.bbox_xyxy[0],
                 "bbox_y1": detection.bbox_xyxy[1],
                 "bbox_x2": detection.bbox_xyxy[2],
@@ -451,6 +473,7 @@ def main() -> None:
                 detection.bbox_xyxy,
                 detection.track_id,
                 detection.confidence,
+                prediction_label,
                 predicted_median,
                 zed_median,
                 lidar["median_m"] if lidar["valid"] else None,
@@ -480,6 +503,7 @@ def main() -> None:
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "recording": args.recording,
         "depth_output_dir": str(args.depth_output_dir),
+        "prediction_models": sorted(prediction_models),
         "detector_weights": args.detector_weights,
         "ultralytics_version": tracker.ultralytics_version,
         "tracker": args.tracker,
@@ -492,6 +516,12 @@ def main() -> None:
         "detections_with_lidar_reference": len(lidar_rows),
         "mean_detector_inference_ms": float(np.mean(detector_speeds))
         if detector_speeds
+        else None,
+        "mean_depth_inference_ms": float(np.mean(depth_inference_times))
+        if depth_inference_times
+        else None,
+        "median_depth_inference_ms": float(np.median(depth_inference_times))
+        if depth_inference_times
         else None,
         "mean_zed_mae_m": float(np.mean([row["zed_mae_m"] for row in zed_rows]))
         if zed_rows

@@ -2,7 +2,11 @@ import unittest
 
 import numpy as np
 
-from src.utils import colorize_depth, create_common_valid_depth_mask
+from src.utils import (
+    colorize_depth,
+    create_common_valid_depth_mask,
+    depth_visualization_limits,
+)
 
 
 class DepthVisualizationTests(unittest.TestCase):
@@ -41,6 +45,31 @@ class DepthVisualizationTests(unittest.TestCase):
 
         expected = np.full((2, 3, 3), 128, dtype=np.uint8)
         np.testing.assert_array_equal(colored, expected)
+
+    def test_fixed_visualization_range_is_independent_of_image_values(self):
+        depth = np.array([[1.0, 3.0], [8.0, np.nan]], dtype=np.float32)
+
+        limits = depth_visualization_limits(depth, value_range=(0.5, 10.0))
+
+        self.assertEqual(limits, (0.5, 10.0))
+
+    def test_automatic_visualization_range_uses_only_valid_pixels(self):
+        depth = np.array([[1.0, 3.0], [100.0, 9.0]], dtype=np.float32)
+        valid_mask = np.array([[1, 1], [0, 1]], dtype=np.uint8)
+
+        limits = depth_visualization_limits(
+            depth,
+            valid_mask=valid_mask,
+            robust_percentiles=(0.0, 100.0),
+        )
+
+        self.assertEqual(limits, (1.0, 9.0))
+
+    def test_invalid_fixed_visualization_range_is_rejected(self):
+        with self.assertRaises(ValueError):
+            depth_visualization_limits(
+                np.ones((2, 2), dtype=np.float32), value_range=(5.0, 5.0)
+            )
 
 
 if __name__ == "__main__":

@@ -325,6 +325,41 @@ def colorize_depth(
 # Visualization
 # ---------------------------------------------------------------------------
 
+def depth_visualization_limits(
+    depth: np.ndarray,
+    valid_mask: np.ndarray | None = None,
+    robust_percentiles: tuple[float, float] = (2.0, 98.0),
+    value_range: tuple[float, float] | None = None,
+) -> tuple[float | None, float | None]:
+    """Resolve a reproducible color range for a depth visualization.
+
+    ``value_range`` should be supplied for camera/model comparisons so the
+    same color always represents the same depth. When omitted, robust limits
+    are estimated from the current image for higher-contrast exploration.
+    """
+    if value_range is not None:
+        vmin, vmax = (float(value) for value in value_range)
+        if not np.isfinite([vmin, vmax]).all() or vmin >= vmax:
+            raise ValueError(
+                "value_range must contain finite values with minimum < maximum"
+            )
+        return vmin, vmax
+
+    valid = np.isfinite(depth)
+    if valid_mask is not None:
+        valid &= valid_mask.astype(bool)
+    values = np.asarray(depth)[valid]
+    if values.size == 0:
+        return None, None
+
+    vmin, vmax = np.percentile(values, robust_percentiles)
+    if vmax <= vmin:
+        vmin, vmax = float(values.min()), float(values.max())
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+    return float(vmin), float(vmax)
+
+
 def save_depth_visualization(
     depth: np.ndarray,
     output_path: Path,
@@ -333,12 +368,15 @@ def save_depth_visualization(
     colormap: str = "inferno",
     invert: bool = False,
     robust_percentiles: tuple[float, float] = (2.0, 98.0),
+    value_range: tuple[float, float] | None = None,
+    depth_unit: str | None = None,
     invalid_color: str = "#808080",
 ) -> None:
     """Save a colorized depth map as a PNG, optionally side-by-side with the RGB image.
 
-    The colormap range is computed from valid pixels only, so an invalid fisheye
-    border cannot skew the scale. Invalid pixels are rendered black.
+    With no explicit range, the colormap limits are computed from valid pixels
+    only, so an invalid fisheye border cannot skew the scale. Supply the same
+    ``value_range`` to every plot used in a comparison. Invalid pixels are gray.
 
     Args:
         depth: float32 (H, W) depth array. May contain NaN.
@@ -352,6 +390,10 @@ def save_depth_visualization(
                 colormap range. Clipping outliers (a few very-near/very-far
                 pixels) spreads the colours over the bulk of the scene, giving
                 much better contrast than raw min/max.
+        value_range: optional fixed (minimum, maximum) display range. Use this
+                for comparable plots across cameras, frames, or models.
+        depth_unit: optional unit shown on the colorbar, e.g. ``"m"`` for
+                metric depth or ``"a.u."`` for relative depth.
         invalid_color: color for masked/no-prediction pixels. The default gray
                 cannot be confused with valid far depth, which renders black.
     """
@@ -364,14 +406,12 @@ def save_depth_visualization(
         combined_invalid |= ~valid_mask.astype(bool)
     depth_display = ma.array(depth, mask=combined_invalid)
 
-    # Robust colour range from valid pixels → better contrast than raw min/max
-    valid_vals = depth[~combined_invalid]
-    if valid_vals.size:
-        vmin, vmax = np.percentile(valid_vals, robust_percentiles)
-        if vmax <= vmin:
-            vmin, vmax = float(valid_vals.min()), float(valid_vals.max()) or vmin + 1
-    else:
-        vmin, vmax = None, None
+    vmin, vmax = depth_visualization_limits(
+        depth,
+        valid_mask=valid_mask,
+        robust_percentiles=robust_percentiles,
+        value_range=value_range,
+    )
 
     cmap = plt.get_cmap(colormap)
     if invert:
@@ -393,13 +433,16 @@ def save_depth_visualization(
         im = axes[1].imshow(depth_display, cmap=cmap, vmin=vmin, vmax=vmax)
         axes[1].set_title(depth_title, fontsize=13)
         axes[1].axis("off")
-        plt.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
+        colorbar = plt.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
     else:
         fig, ax = plt.subplots(figsize=(10, 8))
         im = ax.imshow(depth_display, cmap=cmap, vmin=vmin, vmax=vmax)
         ax.set_title(depth_title, fontsize=13)
         ax.axis("off")
-        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        colorbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    if depth_unit:
+        colorbar.set_label(f"Depth ({depth_unit})")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")

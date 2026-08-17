@@ -28,10 +28,20 @@ Use the ready-to-run notebook for the newer
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/esthy13/monocular-depth-estimation/blob/depth-pipeline/notebooks/unidac_colab.ipynb)
 
-1. Upload `cv_project_data` to Google Drive.
-2. Open the notebook and select **Runtime → Change runtime type → GPU**.
-3. Edit `DATA_DIR` and `OUTPUT_DIR` in its settings cell.
-4. Run the one-frame smoke test before enabling its resumable batch cell.
+Because this repository is private, an unauthenticated Colab link returns 404.
+Open the notebook from Colab's GitHub picker after authorizing private-repository
+access, or download `notebooks/unidac_colab.ipynb` while signed in to GitHub and
+choose **File → Upload notebook** in Colab.
+
+1. [Create a GitHub token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+   that can read this repository. Prefer a fine-grained, expiring token with
+   read-only **Contents** permission when available.
+2. In Colab's **Secrets** panel (key icon), add it as `GITHUB_TOKEN` and enable
+   notebook access. Never paste the token into a code cell.
+3. Upload `cv_project_data` to Google Drive.
+4. Select **Runtime → Change runtime type → GPU**.
+5. Edit `DATA_DIR` and `OUTPUT_DIR` in the notebook's settings cell.
+6. Run the one-frame smoke test before enabling its resumable batch cell.
 
 The notebook pins the official UniDAC source, caches the ~1.4 GB checkpoint in
 Drive, uses the calibrated G1_A/ZED_B camera geometry, and saves metric raw depth

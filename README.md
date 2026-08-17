@@ -52,7 +52,8 @@ Drive, uses the calibrated G1_A/ZED_B camera geometry, and saves metric raw dept
 ## Example outputs
 
 Each visualization shows the input RGB (left) and predicted depth (right).
-Depth is colorized so **near = bright, far = dark**.
+Depth is colorized so **near = bright, far = dark**. Neutral gray means the
+model produced no valid depth there; it is not a far-away surface.
 
 ### Perspective camera (ZED_B) — model difference
 
@@ -151,6 +152,11 @@ Available variants: `dac-indoor-resnet101`, `dac-indoor-swinl`,
 ### UniDAC — metric depth, Colab GPU recommended
 
 The Colab notebook above installs the pinned official source and checkpoint.
+For the circular G1_A lens, the adapter expands UniDAC's rectangular ERP crop
+to cover the full vertical fisheye field of view and masks the black lens border
+before inference. The saved metadata records the effective ERP crop and FoV.
+For later sensor/model evaluation, `create_common_valid_depth_mask()` builds the
+intersection mask so every error metric uses exactly the same aligned pixels.
 After the same setup is available locally, the single-frame CLI also accepts:
 
 ```bash

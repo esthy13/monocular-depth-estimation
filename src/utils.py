@@ -10,6 +10,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.ma as ma
+from matplotlib.colors import to_rgb
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +241,37 @@ def create_fisheye_valid_mask(
     return mask
 
 
+def create_common_valid_depth_mask(
+    *depth_maps: np.ndarray,
+    masks: list[np.ndarray] | tuple[np.ndarray, ...] | None = None,
+    min_depth: float = 0.0,
+) -> np.ndarray:
+    """Return the intersection where every aligned depth source is valid.
+
+    This prevents model comparisons from using different pixel populations.
+    A pixel is retained only when every depth map is finite and greater than
+    ``min_depth``, and when every optional sensor/model mask is non-zero.
+    """
+    if not depth_maps:
+        raise ValueError("At least one depth map is required")
+
+    shape = depth_maps[0].shape
+    common = np.ones(shape, dtype=bool)
+    for index, depth in enumerate(depth_maps):
+        if depth.shape != shape:
+            raise ValueError(
+                f"Depth map {index} has shape {depth.shape}; expected {shape}"
+            )
+        common &= np.isfinite(depth) & (depth > min_depth)
+
+    for index, mask in enumerate(masks or ()):
+        if mask.shape != shape:
+            raise ValueError(f"Mask {index} has shape {mask.shape}; expected {shape}")
+        common &= mask.astype(bool)
+
+    return common.astype(np.uint8)
+
+
 # ---------------------------------------------------------------------------
 # Depth colorization
 # ---------------------------------------------------------------------------
@@ -249,6 +281,7 @@ def colorize_depth(
     valid_mask: np.ndarray | None = None,
     colormap: str = "inferno",
     invert: bool = False,
+    invalid_color: str = "#808080",
 ) -> np.ndarray:
     """Normalize and colorize a depth map, computing min/max from valid pixels only.
 
@@ -259,6 +292,9 @@ def colorize_depth(
         colormap: matplotlib colormap name.
         invert: reverse the colormap so near pixels are bright (use for metric
                 depth, where near = small value).
+        invalid_color: color for masked/no-prediction pixels. Neutral gray is
+                       deliberately distinct from valid far depth, which is black
+                       in the reversed inferno colormap.
 
     Returns:
         uint8 (H, W, 3) RGB colorized depth image.
@@ -267,9 +303,10 @@ def colorize_depth(
     if valid_mask is not None:
         effective_mask &= valid_mask.astype(bool)
 
+    invalid_rgb = np.rint(np.asarray(to_rgb(invalid_color)) * 255).astype(np.uint8)
     d_valid = depth[effective_mask]
     if d_valid.size == 0:
-        return np.zeros((*depth.shape, 3), dtype=np.uint8)
+        return np.broadcast_to(invalid_rgb, (*depth.shape, 3)).copy()
 
     d_min, d_max = float(d_valid.min()), float(d_valid.max())
     depth_norm = np.zeros_like(depth, dtype=np.float32)
@@ -280,7 +317,7 @@ def colorize_depth(
     if invert:
         cmap = cmap.reversed()
     colored = (cmap(depth_norm)[:, :, :3] * 255).astype(np.uint8)  # RGB
-    colored[~effective_mask] = 0  # black for invalid/masked pixels
+    colored[~effective_mask] = invalid_rgb
     return colored
 
 
@@ -296,6 +333,7 @@ def save_depth_visualization(
     colormap: str = "inferno",
     invert: bool = False,
     robust_percentiles: tuple[float, float] = (2.0, 98.0),
+    invalid_color: str = "#808080",
 ) -> None:
     """Save a colorized depth map as a PNG, optionally side-by-side with the RGB image.
 
@@ -314,6 +352,8 @@ def save_depth_visualization(
                 colormap range. Clipping outliers (a few very-near/very-far
                 pixels) spreads the colours over the bulk of the scene, giving
                 much better contrast than raw min/max.
+        invalid_color: color for masked/no-prediction pixels. The default gray
+                cannot be confused with valid far depth, which renders black.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -337,9 +377,13 @@ def save_depth_visualization(
     if invert:
         cmap = cmap.reversed()
     cmap = cmap.copy()
-    cmap.set_bad(color="black")  # invalid fisheye border → black
+    cmap.set_bad(color=invalid_color)
 
-    depth_title = "Predicted Depth (valid region)" if valid_mask is not None else "Predicted Depth"
+    depth_title = (
+        "Predicted Depth (gray = invalid)"
+        if valid_mask is not None
+        else "Predicted Depth"
+    )
 
     if rgb_image is not None:
         fig, axes = plt.subplots(1, 2, figsize=(18, 7))

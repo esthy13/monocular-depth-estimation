@@ -470,7 +470,9 @@ class UniDACDepth(DepthAnyCamera):
     Args:
         cam_params: DAC/UniDAC camera parameters from
             :func:`src.utils.intrinsics_to_dac_cam_params`.
-        crop_wfov: horizontal FoV of the ERP patch in degrees.
+        crop_wfov: requested camera horizontal FoV in degrees. For a circular
+            fisheye, the ERP crop is widened automatically so its vertical span
+            also covers the complete lens while retaining UniDAC's input aspect.
         fwd_sz: optional model input size (H, W). Defaults to the UniDAC config.
         device: ``cuda`` or ``cpu``. CUDA is selected automatically when present.
         repo_dir: path to the cloned official UniDAC repository. Defaults to
@@ -501,6 +503,7 @@ class UniDACDepth(DepthAnyCamera):
         self._model = None
         self._config = None
         self._grid_cache: dict = {}
+        self.last_projection_metadata: dict = {}
         self._repo_dir = repo_dir
         self._checkpoint_path = checkpoint_path
 
@@ -543,6 +546,40 @@ class UniDACDepth(DepthAnyCamera):
             self._grid_cache.clear()
         self._cam_params = cam_params
         self._crop_wfov = float(crop_wfov)
+        self.last_projection_metadata = {}
+
+    @staticmethod
+    def _erp_crop_shape(
+        canonical_height: int,
+        forward_size: tuple[int, int],
+        crop_wfov: float,
+        is_fisheye: bool,
+    ) -> tuple[int, int]:
+        """Return an ERP crop ``(height, width)`` matched to the model input.
+
+        A circular fisheye sees approximately the same angular span vertically
+        and horizontally. UniDAC's indoor input is rectangular (512 x 704), so
+        using a 180-degree *horizontal* crop directly covers only 131 degrees
+        vertically and leaves the top and bottom of a circular image unfilled.
+
+        For fisheye input, cover the complete 180-degree ERP height and expand
+        the horizontal crop to preserve the model-input aspect ratio. The extra
+        left/right area is marked invalid by the ERP attention mask. Perspective
+        cameras retain the official horizontal-FoV calculation.
+        """
+        forward_height, forward_width = (int(value) for value in forward_size)
+        if canonical_height <= 0 or forward_height <= 0 or forward_width <= 0:
+            raise ValueError("ERP and model-input dimensions must be positive")
+
+        if is_fisheye:
+            crop_height = int(canonical_height)
+            crop_width = int(round(crop_height * forward_width / forward_height))
+            crop_width = min(crop_width, 2 * int(canonical_height))
+        else:
+            crop_width = int(canonical_height * float(crop_wfov) / 180.0)
+            crop_height = int(crop_width * forward_height / forward_width)
+
+        return crop_height, crop_width
 
     def load(self) -> None:
         import json
@@ -630,13 +667,44 @@ class UniDACDepth(DepthAnyCamera):
 
         rgb01 = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         dummy_depth = np.zeros((height, width, 1), dtype=np.float32)
-        valid_input = np.ones((height, width, 1), dtype=np.float32)
+        if is_fisheye:
+            # Do not project the black area outside the physical lens into the
+            # ERP patch. Its pixels otherwise look like valid scene content to
+            # the model and can contaminate both attention and metric depth.
+            from .utils import create_fisheye_valid_mask
+
+            lens_mask = create_fisheye_valid_mask(
+                image,
+                center=(float(cam_params["cx"]), float(cam_params["cy"])),
+            )
+            valid_input = lens_mask.astype(np.float32)[..., None]
+        else:
+            valid_input = np.ones((height, width, 1), dtype=np.float32)
 
         theta = 0.0
         phi = np.array(0, dtype=np.float32)
         roll = np.array(0, dtype=np.float32)
-        crop_width = int(canonical_size[0] * self._crop_wfov / 180.0)
-        crop_height = int(crop_width * forward_size[0] / forward_size[1])
+        crop_height, crop_width = self._erp_crop_shape(
+            canonical_size[0],
+            forward_size,
+            self._crop_wfov,
+            is_fisheye,
+        )
+        self.last_projection_metadata = {
+            "requested_horizontal_fov_degrees": float(self._crop_wfov),
+            "erp_crop_height_pixels": int(crop_height),
+            "erp_crop_width_pixels": int(crop_width),
+            "erp_vertical_fov_degrees": float(
+                180.0 * crop_height / canonical_size[0]
+            ),
+            "erp_horizontal_fov_degrees": float(
+                180.0 * crop_width / canonical_size[0]
+            ),
+            "model_input_height": int(forward_size[0]),
+            "model_input_width": int(forward_size[1]),
+            "full_circular_fisheye_coverage": bool(is_fisheye),
+            "input_valid_fraction": float(valid_input.mean()),
+        }
 
         erp_image, erp_depth, _, erp_mask, latitude, longitude = cam_to_erp_patch_fast(
             rgb01,

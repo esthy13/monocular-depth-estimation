@@ -72,7 +72,7 @@ def parse_args() -> argparse.Namespace:
         default="depth_anything_v2",
         help=(
             "Depth model identifier. Options: 'depth_anything_v2', 'dac', "
-            "or a full DAC variant like 'dac-outdoor-resnet101'."
+            "'unidac', or a full DAC variant like 'dac-outdoor-resnet101'."
         ),
     )
     parser.add_argument(
@@ -174,10 +174,11 @@ def main() -> None:
     # Depth estimation
     # ------------------------------------------------------------------
     is_dac = args.model in ("dac",) or args.model.startswith("dac-")
+    needs_camera_geometry = is_dac or args.model == "unidac"
     model_kwargs: dict = {}
 
-    if is_dac:
-        # Build DAC camera params from the loaded intrinsics
+    if needs_camera_geometry:
+        # DAC and UniDAC share the same camera-to-ERP geometry parameters.
         cam_params = intrinsics_to_dac_cam_params(args.sensor, intrinsics)
         # Compute crop FoV: 180° for fisheye, horizontal FoV for perspective
         if cam_model_type == "fisheye":
@@ -190,9 +191,13 @@ def main() -> None:
             "cam_params": cam_params,
             "crop_wfov": crop_wfov,
         }
-        if args.variant:
+        if is_dac and args.variant:
             model_kwargs["variant"] = args.variant
-        print(f"DAC cam_params: {cam_params['camera_model']}  crop_wFov={crop_wfov:.1f}°")
+        geometry_name = "DAC" if is_dac else "UniDAC"
+        print(
+            f"{geometry_name} cam_params: {cam_params['camera_model']}  "
+            f"crop_wFov={crop_wfov:.1f}°"
+        )
     else:
         model_kwargs = {"encoder": args.encoder}
 

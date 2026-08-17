@@ -21,6 +21,22 @@ How to add dependencies to the project:
 uv add torch
 ```
 
+## Google Colab: UniDAC on GPU
+
+Use the ready-to-run notebook for the newer
+[UniDAC](https://github.com/girish1511/UniDAC) metric-depth model:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/esthy13/monocular-depth-estimation/blob/depth-pipeline/notebooks/unidac_colab.ipynb)
+
+1. Upload `cv_project_data` to Google Drive.
+2. Open the notebook and select **Runtime → Change runtime type → GPU**.
+3. Edit `DATA_DIR` and `OUTPUT_DIR` in its settings cell.
+4. Run the one-frame smoke test before enabling its resumable batch cell.
+
+The notebook pins the official UniDAC source, caches the ~1.4 GB checkpoint in
+Drive, uses the calibrated G1_A/ZED_B camera geometry, and saves metric raw depth
+(metres), masks, visualizations, and timing/reproducibility metadata.
+
 ## Example outputs
 
 Each visualization shows the input RGB (left) and predicted depth (right).
@@ -73,7 +89,8 @@ uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 -
 
 > **Note on units.** Depth Anything V2 outputs *relative* (inverse) depth in
 > arbitrary units. DAC outputs *metric* depth in metres — use it when you need
-> real distances for 3D projection / LiDAR comparison.
+> real distances for 3D projection / LiDAR comparison. UniDAC also outputs
+> metric depth in metres.
 
 ### Depth Anything V2 (default model)
 
@@ -119,6 +136,15 @@ uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 -
 Available variants: `dac-indoor-resnet101`, `dac-indoor-swinl`,
 `dac-outdoor-resnet101`, `dac-outdoor-swinl`.
 
+### UniDAC — metric depth, Colab GPU recommended
+
+The Colab notebook above installs the pinned official source and checkpoint.
+After the same setup is available locally, the single-frame CLI also accepts:
+
+```bash
+uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 --image_index 0 --model unidac
+```
+
 ### All options
 
 ```bash
@@ -127,7 +153,7 @@ uv run python run_depth.py \
   --sensor {ZED_B|G1_A} \           # perspective | fisheye
   --recording recording1 \         # recording1..4
   --image_index 0 \                # frame index
-  --model {depth_anything_v2|dac} \
+  --model {depth_anything_v2|dac|unidac} \
   --variant dac-indoor-resnet101 \ # only with --model dac
   --encoder {small|base|large} \   # only for depth_anything_v2
   --fisheye_mask {auto|none} \     # auto-masks the lens circle on fisheye
@@ -136,4 +162,3 @@ uv run python run_depth.py \
 
 - Omit `--model` to use the default `depth_anything_v2`.
 - `--variant` applies only when `--model dac`; `--encoder` only for Depth Anything V2.
-

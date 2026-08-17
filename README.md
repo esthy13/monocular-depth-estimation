@@ -93,6 +93,17 @@ uv run python run_depth.py --data_dir ../ --sensor ZED_B --recording recording1 
   --image_index 0 --evaluate_lidar --lidar_sensor YOUR_LIDAR_SENSOR
 ```
 
+For a recording-level result, add `--evaluate_lidar_all`. It evaluates every
+RGB frame with a LiDAR timestamp match, skips unmatched frames, and writes
+`recording1_ZED_B_YOUR_LIDAR_SENSOR_lidar_global_metrics.json`. The global file
+uses one least-squares scale fitted across all valid projected LiDAR samples;
+per-frame metrics and diagnostic files are also saved.
+
+```bash
+uv run python run_depth.py --data_dir cv_project_data --sensor ZED_B \
+  --recording recording1 --evaluate_lidar_all --lidar_sensor E1_A --alignment auto
+```
+
 Replace `YOUR_LIDAR_SENSOR` with the sensor key used both in
 `extrinsics.json` and in `recording1/data/` (for example, an Ouster/LiDAR
 folder name). The default assumes each extrinsic maps **sensor → G1_A**. If

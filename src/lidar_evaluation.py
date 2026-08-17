@@ -130,6 +130,20 @@ def align_depth(predicted: np.ndarray, ground_truth: np.ndarray, method: str) ->
             raise ValueError("Least-squares alignment needs finite, non-zero predicted depths.")
         scale = float(np.dot(predicted, ground_truth) / denominator)
         return predicted * scale, scale, 0.0
+    if method == "inverse_least_squares":
+        # Depth Anything V2's relative head produces an inverse-depth-like
+        # quantity. Fit 1 / Z = a * prediction + b, then invert only the
+        # fitted positive inverse depths. Inverting raw values first is
+        # unstable: a valid raw value close to zero becomes an enormous outlier.
+        inverse_ground_truth = 1.0 / ground_truth
+        scale, shift = np.linalg.lstsq(
+            np.column_stack((predicted, np.ones(len(predicted)))), inverse_ground_truth, rcond=None
+        )[0]
+        inverse_predicted = predicted * scale + shift
+        aligned = np.divide(
+            1.0, inverse_predicted, out=np.full(len(predicted), np.nan), where=inverse_predicted > 0
+        )
+        return aligned, float(scale), float(shift)
     raise ValueError(f"Unknown alignment method {method!r}.")
 
 

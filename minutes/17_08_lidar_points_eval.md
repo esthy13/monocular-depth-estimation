@@ -66,5 +66,8 @@ The script grabbed the chronologically matching LiDAR file (0000000012_...npy), 
 * **RMSE (Root Mean Squared Error) = 5.414 m**: The root mean squared error. Because it is significantly higher than the MAE, it indicates the presence of severe **macroscopic errors** (outliers) on certain points (e.g., the script estimated an object at 5 meters when it was actually 20 meters away).
 * **AbsRel (Absolute Relative Error) = 0.709**: The average relative error is **70.9%**. This is a very high value, which typically means the monocular model's relative depth has not been properly scaled or calibrated to the actual metric scale of the LiDAR yet.
 
-# Future work:
-I should try adding **a scale alignment step (like Least Squares scaling) between the AI map and the LiDAR points before calculating metrics**. This could reduce the error, that right now is too high
+# Changelog:
+I should try adding **a scale alignment step (like Least Squares scaling) between the AI map and the LiDAR points before calculating metrics**. This could reduce the error, that right now is too high --> implemented, the absolute error and the MAE are consistently reduced
+
+I implemented a batch method to evaluate all images, note that 66 of 68 RGB frames have an E1_A match within 50 ms (the images that do not match within 50 ms with the lidar sensor are going to be excluded, I think)
+

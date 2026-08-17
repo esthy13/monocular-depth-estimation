@@ -28,6 +28,16 @@ class LeastSquaresAlignmentTests(unittest.TestCase):
         self.assertAlmostEqual(result.scale, 2.0)
         self.assertAlmostEqual(result.abs_rel, 0.0)
 
+    def test_inverse_depth_alignment_does_not_invert_raw_near_zero_values(self):
+        raw_inverse_depth = np.array([0.1, 0.2, 0.4, 1e-10])
+        ground_truth = 1.0 / (2.0 * raw_inverse_depth + 0.05)
+
+        result = evaluate_depth(raw_inverse_depth, ground_truth, "inverse_least_squares")
+
+        self.assertAlmostEqual(result.scale, 2.0)
+        self.assertAlmostEqual(result.shift, 0.05)
+        self.assertAlmostEqual(result.abs_rel, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

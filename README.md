@@ -163,7 +163,43 @@ After the same setup is available locally, the single-frame CLI also accepts:
 uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 --image_index 0 --model unidac
 ```
 
-### All options
+## 3D person tracking and physical-sensor evaluation
+
+After generating a G1_A UniDAC batch, run the automated evaluator:
+
+```bash
+uv run python evaluate_person_tracking.py \
+  --data_dir .. \
+  --depth_output_dir /path/to/cv_project_outputs/unidac \
+  --output_dir outputs/evaluation/recording1 \
+  --recording recording1 \
+  --frame_step 10 \
+  --max_frames 50
+```
+
+The evaluator uses the COCO-pretrained
+[YOLO26 instance-segmentation model](https://docs.ultralytics.com/tasks/segment/)
+for person masks and [ByteTrack](https://docs.ultralytics.com/modes/track/) for
+persistent IDs. For every tracked person it:
+
+1. takes robust metric UniDAC depth inside an eroded instance mask;
+2. converts the mask centroid and Euclidean ray depth to G1_A camera-frame XYZ;
+3. reprojects the closest ZED_B depth image through the calibrated extrinsics;
+4. reprojects the two closest LiDAR sweeps and rejects returns inconsistent
+   with the stereo-visible foreground, avoiding cross-sensor occlusion errors;
+5. computes common-pixel MAE, RMSE, absolute-relative error, bias, and 3D error.
+
+Outputs are written to the evaluation directory:
+
+- `person_measurements.csv`: one row per detected person and frame;
+- `track_summary.csv`: aggregate measurements per persistent track ID;
+- `evaluation_summary.json`: run configuration, versions, counts, and averages;
+- `annotated/`: masks, boxes, IDs, and UniDAC/ZED/LiDAR distances.
+
+The updated Colab notebook exposes the same workflow in its optional final
+section and caches `yolo26n-seg.pt` in Google Drive.
+
+## All depth-estimation options
 
 ```bash
 uv run python run_depth.py \

@@ -14,9 +14,45 @@ is mocked automatically if absent.
 """
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import numpy as np
+
+
+def _huggingface_token(env_file: Path | None = None) -> str | None:
+    """Return the optional HF token from the environment or project ``.env``.
+
+    ``HF_TOKEN`` in the process environment takes precedence. The parser reads
+    only that key, so credentials are neither printed nor sent to unrelated
+    configuration handling.
+    """
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        return token
+
+    path = env_file or Path(__file__).resolve().parents[1] / ".env"
+    try:
+        lines = path.read_text().splitlines()
+    except FileNotFoundError:
+        return None
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, value = line.partition("=")
+        if key.strip() != "HF_TOKEN" or not separator:
+            continue
+        token = value.strip().strip("\"'")
+        if token:
+            # Make the token available to any Hugging Face subcomponent as well.
+            os.environ["HF_TOKEN"] = token
+            return token
+    return None
 
 
 class DepthModel(ABC):
@@ -90,8 +126,9 @@ class DepthAnythingV2(DepthModel):
         from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
         print(f"Loading {self.model_id} on {self.device} ...")
-        self._processor = AutoImageProcessor.from_pretrained(self.model_id)
-        self._model = AutoModelForDepthEstimation.from_pretrained(self.model_id)
+        token = _huggingface_token()
+        self._processor = AutoImageProcessor.from_pretrained(self.model_id, token=token)
+        self._model = AutoModelForDepthEstimation.from_pretrained(self.model_id, token=token)
         self._model.to(self.device).eval()
         print("Model loaded.")
 
@@ -255,11 +292,12 @@ class DepthAnyCamera(DepthModel):
         _mock_dac_ops_if_missing()
 
         config_file, weights_file = self.VARIANTS[self.variant]
+        token = _huggingface_token()
 
         print(f"Downloading DAC config  : {config_file}")
-        config_path = hf_hub_download(repo_id=self.HF_REPO, filename=config_file)
+        config_path = hf_hub_download(repo_id=self.HF_REPO, filename=config_file, token=token)
         print(f"Downloading DAC weights : {weights_file}  (first run ~700 MB)")
-        weights_path = hf_hub_download(repo_id=self.HF_REPO, filename=weights_file)
+        weights_path = hf_hub_download(repo_id=self.HF_REPO, filename=weights_file, token=token)
 
         with open(config_path) as f:
             config = json.load(f)

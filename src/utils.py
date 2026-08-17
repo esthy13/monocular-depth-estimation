@@ -85,6 +85,60 @@ def find_depth_files(
     return files
 
 
+def find_sensor_npy_files(
+    data_dir: Path,
+    sensor_name: str,
+    recording: str = "recording1",
+) -> list[Path]:
+    """Return sorted NumPy files for any sensor stored as ``data/<sensor>/<sensor>``."""
+    sensor_dir = Path(data_dir) / recording / "data" / sensor_name / sensor_name
+    if not sensor_dir.exists():
+        available = sorted(p.name for p in (Path(data_dir) / recording / "data").iterdir())
+        raise FileNotFoundError(f"Sensor directory not found: {sensor_dir}. Available sensors: {available}")
+    files = sorted(sensor_dir.glob("*.npy"))
+    if not files:
+        raise FileNotFoundError(f"No .npy files found in {sensor_dir}")
+    return files
+
+
+def sensor_to_reference_transform(extrinsics: dict, sensor_name: str) -> np.ndarray:
+    """Extract a sensor-to-reference 4×4 calibration matrix from common JSON layouts."""
+    if sensor_name not in extrinsics:
+        raise KeyError(f"No extrinsic calibration for {sensor_name!r}; keys: {list(extrinsics)}")
+    entry = extrinsics[sensor_name]
+    if isinstance(entry, dict):
+        for key in ("T", "transform", "matrix", "extrinsic", "extrinsics"):
+            if key in entry:
+                entry = entry[key]
+                break
+    matrix = np.asarray(entry, dtype=np.float64)
+    if matrix.shape != (4, 4):
+        raise ValueError(f"Extrinsic for {sensor_name!r} must be 4×4; got {matrix.shape}.")
+    return matrix
+
+
+def camera_from_lidar_transform(
+    extrinsics: dict,
+    camera_sensor: str,
+    lidar_sensor: str,
+    convention: str = "sensor_to_reference",
+) -> np.ndarray:
+    """Return ``T_camera_lidar`` from calibrations expressed relative to a reference.
+
+    ``sensor_to_reference`` means each stored matrix maps that sensor's frame to
+    the reference frame; choose ``reference_to_sensor`` if the JSON uses inverse
+    matrices. Keeping this choice explicit avoids silently evaluating with a
+    reversed calibration.
+    """
+    camera = sensor_to_reference_transform(extrinsics, camera_sensor)
+    lidar = sensor_to_reference_transform(extrinsics, lidar_sensor)
+    if convention == "sensor_to_reference":
+        return np.linalg.inv(camera) @ lidar
+    if convention == "reference_to_sensor":
+        return camera @ np.linalg.inv(lidar)
+    raise ValueError("convention must be 'sensor_to_reference' or 'reference_to_sensor'.")
+
+
 # ---------------------------------------------------------------------------
 # Timestamp utilities
 # ---------------------------------------------------------------------------

@@ -75,6 +75,53 @@ uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 -
 > arbitrary units. DAC outputs *metric* depth in metres — use it when you need
 > real distances for 3D projection / LiDAR comparison.
 
+### Hugging Face authentication
+
+Model downloads use `HF_TOKEN` when it is set in the shell or in the project's
+git-ignored `.env` file. For example: `HF_TOKEN=hf_your_token`. The token is
+used for both Transformers and direct Hugging Face Hub downloads, and is never
+printed.
+
+## LiDAR ground-truth evaluation (perspective camera)
+
+`run_depth.py` can timestamp-match a LiDAR cloud, transform its points into the
+perspective camera frame, project the visible points using the calibrated OpenCV
+intrinsics (including distortion), and compare the model at those pixels.
+
+```bash
+uv run python run_depth.py --data_dir ../ --sensor ZED_B --recording recording1 \
+  --image_index 0 --evaluate_lidar --lidar_sensor YOUR_LIDAR_SENSOR
+```
+
+Replace `YOUR_LIDAR_SENSOR` with the sensor key used both in
+`extrinsics.json` and in `recording1/data/` (for example, an Ouster/LiDAR
+folder name). The default assumes each extrinsic maps **sensor → G1_A**. If
+your calibration stores the inverse direction, add:
+
+```bash
+--extrinsics_convention reference_to_sensor
+```
+
+The run writes three additional files alongside the depth output:
+
+- `_lidar_projection.png`: RGB image with the nearest projected LiDAR return
+  per pixel, coloured by LiDAR depth. This is the primary calibration sanity
+  check—points should land on their corresponding image structures.
+- `_lidar_metrics.json`: count, alignment parameters, MAE, RMSE, AbsRel,
+  SqRel, log-RMSE, and the standard δ<1.25 / δ<1.25² / δ<1.25³ accuracies.
+- `_lidar_samples.csv`: pixel coordinates and each LiDAR/predicted depth pair,
+  for plotting or further analysis.
+
+Depth Anything V2 is not metrically scaled. For it, the default `--alignment
+auto` takes the reciprocal of its inverse-depth output and estimates a
+least-squares scale against the sampled LiDAR depths **before** calculating
+errors. This is a **per-frame, LiDAR-aligned** score, not a zero-shot metric-depth
+score. Use `--alignment median` for median scaling or `--alignment none` only
+for a model that already outputs metres (such as DAC). Record the selected
+alignment with every result; fitting and testing on the same sparse points is
+useful for evaluating shape/relative-depth quality but is optimistic for
+metric-depth claims.
+
 ### Depth Anything V2 (default model)
 
 ```bash
@@ -136,4 +183,3 @@ uv run python run_depth.py \
 
 - Omit `--model` to use the default `depth_anything_v2`.
 - `--variant` applies only when `--model dac`; `--encoder` only for Depth Anything V2.
-

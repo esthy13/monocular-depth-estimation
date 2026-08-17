@@ -108,6 +108,35 @@ def parse_args() -> argparse.Namespace:
         choices=["nan", "zero"],
         help="Value written to invalid (masked) depth pixels (default: nan).",
     )
+    parser.add_argument(
+        "--evaluate_lidar",
+        action="store_true",
+        help="Project the timestamp-matched LiDAR cloud and evaluate the predicted depth.",
+    )
+    parser.add_argument(
+        "--lidar_sensor",
+        type=str,
+        default=None,
+        help="LiDAR sensor key in the recording and extrinsics.json (required with --evaluate_lidar).",
+    )
+    parser.add_argument(
+        "--max_lidar_dt",
+        type=float,
+        default=0.05,
+        help="Maximum RGB-to-LiDAR timestamp difference in seconds.",
+    )
+    parser.add_argument(
+        "--extrinsics_convention",
+        choices=["sensor_to_reference", "reference_to_sensor"],
+        default="sensor_to_reference",
+        help="Direction used by matrices in extrinsics.json.",
+    )
+    parser.add_argument(
+        "--alignment",
+        choices=["auto", "none", "median", "least_squares"],
+        default="auto",
+        help="Metric alignment for sparse LiDAR evaluation. 'auto' uses least-squares scaling for relative models.",
+    )
     return parser.parse_args()
 
 
@@ -124,8 +153,23 @@ def main() -> None:
         save_depth_visualization,
         save_mask_visualization,
         intrinsics_to_dac_cam_params,
+        find_sensor_npy_files,
+        match_by_timestamp,
+        camera_from_lidar_transform,
     )
     from src.depth_models import build_depth_model
+    from src.lidar_evaluation import (
+        evaluate_depth,
+        keep_nearest_per_pixel,
+        load_lidar_points,
+        project_perspective_points,
+        sample_bilinear,
+        save_metrics,
+        save_point_samples,
+        save_projection_overlay,
+        transform_points,
+        align_depth,
+    )
 
     # ------------------------------------------------------------------
     # Calibration
@@ -271,6 +315,70 @@ def main() -> None:
     raw_path = output_dir / f"{stem}_depth_raw.npy"
     np.save(raw_path, depth)
     print(f"Saved raw depth:      {raw_path}")
+
+    # ------------------------------------------------------------------
+    # Sparse LiDAR evaluation (perspective cameras only)
+    # ------------------------------------------------------------------
+    if args.evaluate_lidar:
+        if args.lidar_sensor is None:
+            raise ValueError("--evaluate_lidar requires --lidar_sensor (the LiDAR key in extrinsics.json).")
+        if cam_model_type != "perspective":
+            raise ValueError("LiDAR evaluation currently supports perspective cameras only.")
+
+        lidar_files = find_sensor_npy_files(args.data_dir, args.lidar_sensor, args.recording)
+        matched = match_by_timestamp([image_path], lidar_files, max_dt=args.max_lidar_dt)
+        if not matched:
+            raise FileNotFoundError(
+                f"No {args.lidar_sensor} point cloud within {args.max_lidar_dt:.3f}s of {image_path.name}."
+            )
+        _, lidar_path = matched[0]
+        print(f"LiDAR cloud: {lidar_path.name}")
+
+        lidar_points = load_lidar_points(lidar_path)
+        T_camera_lidar = camera_from_lidar_transform(
+            extrinsics, args.sensor, args.lidar_sensor, args.extrinsics_convention
+        )
+        points_camera = transform_points(lidar_points, T_camera_lidar)
+        pixels, lidar_depth, _ = project_perspective_points(
+            points_camera, intrinsics[args.sensor], image.shape[:2]
+        )
+        nearest = keep_nearest_per_pixel(pixels, lidar_depth)
+        pixels, lidar_depth = pixels[nearest], lidar_depth[nearest]
+        if not len(pixels):
+            raise ValueError("No forward-facing LiDAR points project inside this image; check the extrinsics convention.")
+
+        projection_path = output_dir / f"{stem}_lidar_projection.png"
+        save_projection_overlay(image, pixels, lidar_depth, projection_path)
+        print(f"Saved LiDAR projection: {projection_path} ({len(pixels)} visible points)")
+
+        sampled_prediction = sample_bilinear(depth, pixels)
+        valid = np.isfinite(sampled_prediction) & (sampled_prediction > 0) & np.isfinite(lidar_depth) & (lidar_depth > 0)
+        pixels, lidar_depth, sampled_prediction = pixels[valid], lidar_depth[valid], sampled_prediction[valid]
+        if not len(sampled_prediction):
+            raise ValueError("No projected LiDAR points have valid predicted depth samples.")
+
+        # Depth Anything V2 emits a relative inverse-depth map. Its reciprocal is
+        # a distance-like proxy; a LiDAR scale is essential before metre errors.
+        prediction_proxy = sampled_prediction if getattr(model, "is_metric", False) else 1.0 / sampled_prediction
+        alignment = args.alignment
+        if alignment == "auto":
+            alignment = "none" if getattr(model, "is_metric", False) else "least_squares"
+        result = evaluate_depth(prediction_proxy, lidar_depth, alignment)
+        aligned_prediction, _, _ = align_depth(prediction_proxy, lidar_depth, alignment)
+
+        metrics_path = output_dir / f"{stem}_lidar_metrics.json"
+        samples_path = output_dir / f"{stem}_lidar_samples.csv"
+        save_metrics(
+            metrics_path, result,
+            image=str(image_path), lidar_cloud=str(lidar_path), camera_sensor=args.sensor,
+            lidar_sensor=args.lidar_sensor, timestamp_tolerance_s=args.max_lidar_dt,
+            extrinsics_convention=args.extrinsics_convention,
+            prediction_representation=("metric_depth_m" if getattr(model, "is_metric", False) else "reciprocal_relative_depth"),
+        )
+        save_point_samples(samples_path, pixels, lidar_depth, prediction_proxy, aligned_prediction)
+        print(f"LiDAR metrics ({result.count} points): MAE={result.mae_m:.3f} m, RMSE={result.rmse_m:.3f} m, AbsRel={result.abs_rel:.3f}")
+        print(f"Saved metrics:        {metrics_path}")
+        print(f"Saved point samples:  {samples_path}")
 
 
 if __name__ == "__main__":

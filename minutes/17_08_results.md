@@ -1,4 +1,10 @@
-## Comparison: Unidepth V2 vs Lidar Sensor 
+## Comparison: Depth Anything V2 vs LiDAR (per-frame oracle alignment)
+
+> Correction (2026-08-18): this run used the default Depth Anything V2 model,
+> not UniDepth V2. The reported results use `inverse_least_squares` fitted
+> independently on each frame with the same LiDAR samples that are scored.
+> They measure oracle-aligned relative-depth shape and must not be presented as
+> metric-depth accuracy.
 
 #### Recording 1
 Timestamp dt (LiDAR + offset - camera): min=-0.028497, max=0.038958, mean=0.005241, median=0.005174, std=0.025265 s

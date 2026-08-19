@@ -30,6 +30,15 @@ were fitted separately on each evaluated frame using that frame's LiDAR points,
 so these values measure depth shape after oracle alignment, not independent
 metric accuracy.
 
+The following UniDAC example shows the RGB image and projected LiDAR points in
+the top row, followed by the metric-depth prediction and LiDAR overlay in the
+bottom row. The LiDAR has a narrower field of view than the camera, which is why
+the projected points cover only the right part of the image. The uncovered area
+does not indicate missing or invalid model depth. We calculate the LiDAR metrics
+only at pixels with a valid projected LiDAR reference.
+
+![Representative perspective UniDAC prediction with partial LiDAR coverage](images/perspective_unidac_lidar_coverage.png)
+
 The camera and LiDAR timestamps are matched within 50 ms. Their residual time
 difference has a standard deviation of about 26 ms across the four recordings.
 Motion blur, remaining synchronization differences, and the different sensor

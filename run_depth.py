@@ -29,6 +29,9 @@ import cv2
 import numpy as np
 
 
+DEFAULT_METRIC_VISUALIZATION_RANGE_M = (0.5, 10.0)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run monocular depth estimation on a single RGB image.",
@@ -128,7 +131,8 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Fixed colorbar range in the selected model's output units. Use the "
             "same range for every image in a visual comparison. When omitted, "
-            "each image uses robust automatic limits."
+            "metric models use 0.5-10.0 m and relative models use robust "
+            "per-image limits."
         ),
     )
     parser.add_argument(
@@ -309,6 +313,23 @@ def main() -> None:
 
     model = build_depth_model(args.model, **model_kwargs)
     model.load()
+    visualization_range = (
+        tuple(args.visualization_range)
+        if args.visualization_range is not None
+        else (
+            DEFAULT_METRIC_VISUALIZATION_RANGE_M
+            if getattr(model, "is_metric", False)
+            else None
+        )
+    )
+    if visualization_range is not None:
+        print(
+            "Visualization scale: fixed "
+            f"{visualization_range[0]:g} to {visualization_range[1]:g} "
+            f"{'m' if getattr(model, 'is_metric', False) else 'a.u.'}"
+        )
+    else:
+        print("Visualization scale: per-image 2-98% range (a.u.)")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -347,10 +368,13 @@ def main() -> None:
         save_depth_visualization(
             depth, output_dir / f"{stem}_depth.png", rgb_image=image, valid_mask=valid_mask,
             invert=getattr(model, "is_metric", False),
-            value_range=tuple(args.visualization_range)
-            if args.visualization_range is not None
-            else None,
+            value_range=visualization_range,
             depth_unit="m" if getattr(model, "is_metric", False) else "a.u.",
+            quantity_label=(
+                "Metric depth"
+                if getattr(model, "is_metric", False)
+                else "Relative inverse depth"
+            ),
         )
         if valid_mask is not None:
             save_mask_visualization(valid_mask, output_dir / f"{stem}_mask.png")

@@ -416,6 +416,34 @@ def depth_visualization_limits(
     return float(vmin), float(vmax)
 
 
+def depth_visualization_scale_label(
+    vmin: float | None,
+    vmax: float | None,
+    *,
+    depth_unit: str | None = None,
+    fixed_range: bool = False,
+    robust_percentiles: tuple[float, float] = (2.0, 98.0),
+    quantity_label: str = "Depth",
+) -> str:
+    """Describe the quantity, units, and exact color scale used by a plot."""
+    quantity = quantity_label.strip() or "Depth"
+    unit_suffix = f" ({depth_unit})" if depth_unit else ""
+    first_line = f"{quantity}{unit_suffix}"
+    if vmin is None or vmax is None:
+        return f"{first_line}\nNo valid display range"
+
+    value_unit = f" {depth_unit}" if depth_unit else ""
+    limits = f"{vmin:.4g} to {vmax:.4g}{value_unit}"
+    if fixed_range:
+        return f"{first_line}\nFixed display range: {limits}"
+
+    low, high = robust_percentiles
+    return (
+        f"{first_line}\nPer-image display range "
+        f"({low:g}-{high:g}%): {limits}"
+    )
+
+
 def save_depth_visualization(
     depth: np.ndarray,
     output_path: Path,
@@ -426,6 +454,7 @@ def save_depth_visualization(
     robust_percentiles: tuple[float, float] = (2.0, 98.0),
     value_range: tuple[float, float] | None = None,
     depth_unit: str | None = None,
+    quantity_label: str = "Depth",
     invalid_color: str = "#808080",
 ) -> None:
     """Save a colorized depth map as a PNG, optionally side-by-side with the RGB image.
@@ -450,6 +479,8 @@ def save_depth_visualization(
                 for comparable plots across cameras, frames, or models.
         depth_unit: optional unit shown on the colorbar, e.g. ``"m"`` for
                 metric depth or ``"a.u."`` for relative depth.
+        quantity_label: physical or model quantity shown on the colorbar, e.g.
+                ``"Metric depth"`` or ``"Relative inverse depth"``.
         invalid_color: color for masked/no-prediction pixels. The default gray
                 cannot be confused with valid far depth, which renders black.
     """
@@ -497,8 +528,16 @@ def save_depth_visualization(
         ax.axis("off")
         colorbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    if depth_unit:
-        colorbar.set_label(f"Depth ({depth_unit})")
+    colorbar.set_label(
+        depth_visualization_scale_label(
+            vmin,
+            vmax,
+            depth_unit=depth_unit,
+            fixed_range=value_range is not None,
+            robust_percentiles=robust_percentiles,
+            quantity_label=quantity_label,
+        )
+    )
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")

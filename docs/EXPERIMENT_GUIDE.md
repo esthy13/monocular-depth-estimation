@@ -103,8 +103,10 @@ MyDrive/cv_project_outputs/dac/<recording>/G1_A/
 
 ## 4. Use comparable plot scales
 
-The Colab notebook fixes every metric plot to `0.5–10.0 m`. The CLI exposes the
-same behavior:
+The Colab notebooks and CLI fix every metric plot to `0.5-10.0 m` for both the
+G1_A fisheye and ZED_B perspective cameras. The CLI uses this metric default
+even if the option is omitted; pass it explicitly in recorded experiment
+commands for clarity:
 
 ```bash
 uv run python run_depth.py \
@@ -118,9 +120,12 @@ uv run python run_depth.py \
 ```
 
 Use the same range for every metric camera/model plot in one comparison. Each
-colorbar is labelled `Depth (m)`. Depth Anything V2 is relative depth and is
-labelled `Depth (a.u.)`; its colors must not be numerically compared with DAC or
-UniDAC.
+colorbar states `Metric depth (m)`, `Fixed display range`, and its exact limits.
+Depth Anything V2 is relative inverse depth: its colorbar states `a.u.`, the
+per-image percentile policy, and the exact limits. Its colors must not be
+numerically compared with DAC or UniDAC. The rationale, comparison figure, and
+report-ready wording are in the
+[depth visualization scale policy](VISUALIZATION_SCALE.md).
 
 ## 5. Run person tracking and sensor evaluation
 

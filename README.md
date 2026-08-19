@@ -26,6 +26,7 @@ The current result and known long-range failure are summarized below.
 ## Documentation
 
 - [Experiment and execution guide](docs/EXPERIMENT_GUIDE.md)
+- [Depth visualization scale policy](docs/VISUALIZATION_SCALE.md)
 - [Camera geometry used by each model](docs/MODEL_GEOMETRY.md)
 - [Recording 1 UniDAC full-sequence results](docs/RESULTS_RECORDING1_UNIDAC.md)
 - [Recording 1 matched DAC versus UniDAC results](docs/RESULTS_RECORDING1_DAC_VS_UNIDAC.md)
@@ -151,11 +152,28 @@ The dedicated benchmark notebook measures both models sequentially in one GPU
 runtime using identical decoded frames, five warm-up runs, and ten timed
 repetitions per frame.
 
+## Depth visualization scale
+
+Metric colors use the same fixed **0.5-10.0 m** range for both camera
+geometries. This makes the two DAC panels below directly comparable by color;
+the colorbar states the unit, fixed policy, and exact limits.
+
+![Shared 0.5-10.0 m scale for fisheye and perspective cameras](docs/images/metric_camera_scale_comparison.png)
+
+Depth Anything V2 is different: it produces relative inverse depth in
+arbitrary units and uses a separately labelled per-image 2nd-98th-percentile
+range. Its colors cannot be interpreted as metres. See the
+[visualization scale policy](docs/VISUALIZATION_SCALE.md) for the full decision
+and report-ready wording.
+
 ## Example outputs
 
 Each visualization shows the input RGB (left) and predicted depth (right).
 Depth is colorized so **near = bright, far = dark**. Neutral gray means the
-model produced no valid depth there; it is not a far-away surface.
+model produced no valid depth there; it is not a far-away surface. These older
+qualitative examples used per-image automatic ranges, so compare scene shape
+and boundaries rather than colors between their panels. New plots state their
+exact scale directly on the colorbar.
 
 ### Perspective camera (ZED_B) — model difference
 

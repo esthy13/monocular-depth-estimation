@@ -6,6 +6,7 @@ from src.utils import (
     colorize_depth,
     create_common_valid_depth_mask,
     depth_visualization_limits,
+    depth_visualization_scale_label,
 )
 
 
@@ -70,6 +71,37 @@ class DepthVisualizationTests(unittest.TestCase):
             depth_visualization_limits(
                 np.ones((2, 2), dtype=np.float32), value_range=(5.0, 5.0)
             )
+
+    def test_fixed_metric_scale_label_states_exact_range(self):
+        label = depth_visualization_scale_label(
+            0.5,
+            10.0,
+            depth_unit="m",
+            fixed_range=True,
+            quantity_label="Metric depth",
+        )
+
+        self.assertEqual(
+            label,
+            "Metric depth (m)\nFixed display range: 0.5 to 10 m",
+        )
+
+    def test_relative_scale_label_states_per_image_range(self):
+        label = depth_visualization_scale_label(
+            0.44781,
+            5.7986,
+            depth_unit="a.u.",
+            robust_percentiles=(2.0, 98.0),
+            quantity_label="Relative inverse depth",
+        )
+
+        self.assertEqual(
+            label,
+            (
+                "Relative inverse depth (a.u.)\n"
+                "Per-image display range (2-98%): 0.4478 to 5.799 a.u."
+            ),
+        )
 
 
 if __name__ == "__main__":

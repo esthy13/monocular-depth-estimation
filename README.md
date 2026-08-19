@@ -170,32 +170,34 @@ and report-ready wording.
 
 Each visualization shows the input RGB (left) and predicted depth (right).
 Depth is colorized so **near = bright, far = dark**. Neutral gray means the
-model produced no valid depth there; it is not a far-away surface. These older
-qualitative examples used per-image automatic ranges, so compare scene shape
-and boundaries rather than colors between their panels. New plots state their
-exact scale directly on the colorbar.
+model produced no valid depth there; it is not a far-away surface. The DAC and
+UniDAC examples use the same fixed 0.5-10.0 m scale and can be compared by
+color. Depth Anything V2 uses a separately labelled per-image scale in
+arbitrary units, so compare only its scene shape and boundaries with the metric
+models. Every new plot states its exact scale directly on the colorbar.
 
-### Perspective camera (ZED_B) — model difference
+### Perspective camera (ZED_B) — model comparison
 
-The same perspective frame with two models. Depth Anything V2 gives the sharpest,
-cleanest result (crisp subject and room edges) but in relative units. DAC is
-**metric** (metres) and works across camera types, but is softer on standard
-pinhole images.
+The same perspective frame with all three models. Depth Anything V2 gives a
+sharp visual result but only in relative units. DAC and UniDAC produce metric
+depth in metres; their panels share the fixed display scale and are therefore
+directly comparable by color.
 
-| Depth Anything V2 (relative) | DAC `dac-indoor-resnet101` (metric) |
-| --- | --- |
-| ![Perspective — Depth Anything V2](docs/images/perspective_depth_anything_v2.png) | ![Perspective — DAC indoor ResNet101](docs/images/perspective_dac_indoor_resnet101.png) |
+| Depth Anything V2 (relative) | DAC `dac-indoor-resnet101` (metric) | UniDAC (metric) |
+| --- | --- | --- |
+| ![Perspective — Depth Anything V2](docs/images/perspective_depth_anything_v2.png) | ![Perspective — DAC indoor ResNet101](docs/images/perspective_dac_indoor_resnet101.png) | ![Perspective — UniDAC](docs/images/perspective_unidac.png) |
 
-### Fisheye camera (G1_A) — model difference
+### Fisheye camera (G1_A) — model comparison
 
-The same fisheye frame with two models. Depth Anything V2 (relative depth) does
-not understand fisheye distortion and gives a flat, roughly radial result with a
-faint subject. Depth Any Camera (DAC) is distortion-aware and **metric** (metres),
-resolving the standing person and the hallway structure.
+The same fisheye frame with all three models. Depth Anything V2 (relative
+depth) has no explicit fisheye calibration and gives a flat, roughly radial
+result with a faint subject. DAC and UniDAC both use the calibrated lens model
+and produce metric depth in metres. UniDAC is the accuracy-oriented model
+selected by the matched four-recording evaluation.
 
-| Depth Anything V2 (relative) | DAC `dac-indoor-resnet101` (metric) |
-| --- | --- |
-| ![Fisheye — Depth Anything V2](docs/images/fisheye_depth_anything_v2.png) | ![Fisheye — DAC indoor ResNet101](docs/images/fisheye_dac_indoor_resnet101.png) |
+| Depth Anything V2 (relative) | DAC `dac-indoor-resnet101` (metric) | UniDAC (metric) |
+| --- | --- | --- |
+| ![Fisheye — Depth Anything V2](docs/images/fisheye_depth_anything_v2.png) | ![Fisheye — DAC indoor ResNet101](docs/images/fisheye_dac_indoor_resnet101.png) | ![Fisheye — UniDAC](docs/images/fisheye_unidac.png) |
 
 **Current baseline:** Depth Anything V2 is the sharp perspective-camera visual
 baseline. For calibrated metric G1_A depth, the matched 1,204-frame evaluation

@@ -28,6 +28,7 @@ The current result and known long-range failure are summarized below.
 - [Experiment and execution guide](docs/EXPERIMENT_GUIDE.md)
 - [Depth visualization scale policy](docs/VISUALIZATION_SCALE.md)
 - [Camera geometry used by each model](docs/MODEL_GEOMETRY.md)
+- [Project update: models compared with LiDAR](docs/PROJECT_UPDATE_LIDAR_COMPARISON.md)
 - [Recording 1 UniDAC full-sequence results](docs/RESULTS_RECORDING1_UNIDAC.md)
 - [Recording 1 matched DAC versus UniDAC results](docs/RESULTS_RECORDING1_DAC_VS_UNIDAC.md)
 - [All-recording matched DAC versus UniDAC results](docs/RESULTS_ALL_RECORDINGS_DAC_VS_UNIDAC.md)

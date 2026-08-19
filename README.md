@@ -1,9 +1,29 @@
 # monocular-depth-estimation
 
-Metric monocular depth, calibrated 3D person localization, and tracking for the
-G1_A fisheye camera, evaluated against ZED stereo and two LiDAR sensors.
+This research repository investigates whether a single RGB camera can support
+3D person detection and tracking when monocular depth replaces a dedicated
+depth sensor. It predicts depth for the calibrated G1_A fisheye and ZED_B
+perspective cameras, localizes tracked people in 3D, and evaluates the estimates
+against synchronized ZED stereo depth and two LiDAR sensors.
 
-Detailed instructions and methodology:
+The implemented pipeline is:
+
+1. generate relative or metric monocular depth from an RGB frame;
+2. segment and track people with YOLO26 and ByteTrack;
+3. back-project each person into the calibrated G1_A coordinate system;
+4. compare the estimate with timestamp-matched ZED and LiDAR measurements; and
+5. report accuracy, failure cases, and hardware-specific inference speed.
+
+| Model | Output | Camera geometry | Role in this project |
+| --- | --- | --- | --- |
+| Depth Anything V2 | Relative depth | Inferred from image content; no camera intrinsics | Perspective visual baseline and oracle-aligned diagnostic |
+| DAC | Metric depth (m) | Uses calibrated camera intrinsics and lens model | Faster fisheye metric baseline |
+| UniDAC | Metric depth (m) | Uses calibrated camera intrinsics and lens model | Accuracy-oriented fisheye metric baseline |
+
+This is experimental research code, not a safety-certified perception system.
+The current result and known long-range failure are summarized below.
+
+## Documentation
 
 - [Experiment and execution guide](docs/EXPERIMENT_GUIDE.md)
 - [Camera geometry used by each model](docs/MODEL_GEOMETRY.md)
@@ -34,13 +54,43 @@ monocular-depth-estimation/
 
 ## Local setup
 
-Install Python 3.12 and `uv`, then create the locked environment:
+Install Python 3.12 and [`uv`](https://docs.astral.sh/uv/), then create the
+locked environment:
 
 ```bash
 uv sync --locked
 ```
 
 Run commands with `uv run python ...`; manual activation is optional.
+
+The expected directory layout is:
+
+```text
+cv_project_data/
+├── intrinsic.json
+├── extrinsics.json
+├── recording1/ ... recording4/
+└── monocular-depth-estimation/   # this repository
+```
+
+Depth Anything V2 needs no additional source checkout. To run DAC or UniDAC
+locally, clone the exact upstream revisions used by the completed experiments:
+
+```bash
+git clone https://github.com/yuliangguo/depth_any_camera.git third_party/depth_any_camera
+git -C third_party/depth_any_camera checkout 371ee299429257bb9a27d1e23b7dc53670e37023
+
+git clone https://github.com/girish1511/UniDAC.git third_party/UniDAC
+git -C third_party/UniDAC checkout 9ddfc1f4cea68e08273ec9bca037f2ef9e1aa90e
+```
+
+Model checkpoints are downloaded from Hugging Face on first use and cached.
+Before a long run, verify the command interfaces and project tests:
+
+```bash
+uv run python run_depth.py --help
+PYTHONPATH=. uv run --with pytest pytest -q tests
+```
 
 ### Local Apple Silicon execution
 
@@ -53,7 +103,7 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python run_metric_depth_batch.py \
   --data_dir .. \
   --output_dir ../local_experiments/unidac \
   --model UniDAC \
-  --recordings recording2 recording3 recording4 \
+  --recordings recording1 recording2 recording3 recording4 \
   --device mps
 ```
 
@@ -93,9 +143,10 @@ Each notebook pins its official upstream source, caches its model checkpoint in
 Drive, uses the calibrated G1_A/ZED_B camera geometry, and saves metric raw depth
 (metres), masks, visualizations, and timing/reproducibility metadata. The DAC
 notebook also creates the protocol-checked DAC-versus-UniDAC comparison after
-both evaluations are available. The batch defaults now target the remaining
-full G1_A sequences (`recording2`–`recording4`) without overwriting completed
-files, then produces per-recording tables and a weighted four-recording summary.
+both evaluations are available. To reproduce the completed experiment, process
+all four G1_A sequences with `FRAME_STEP = 1` and no frame limit: 1,204 frames
+per model. The notebooks do not overwrite completed files and produce
+per-recording tables plus a weighted four-recording summary.
 The dedicated benchmark notebook measures both models sequentially in one GPU
 runtime using identical decoded frames, five warm-up runs, and ten timed
 repetitions per frame.
@@ -153,8 +204,14 @@ fisheye camera — a binary valid-region mask (`_mask.png`).
 # Perspective camera (ZED_B) — Depth Anything V2 gives the sharpest result
 uv run python run_depth.py --data_dir ../ --sensor ZED_B --recording recording1 --image_index 0
 
-# Fisheye camera (G1_A) — calibrated metric DAC baseline with a fixed report scale
-uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 --image_index 0 --model dac --variant dac-indoor-resnet101 --visualization_range 0.5 10.0
+# Fisheye camera (G1_A) — accuracy-oriented metric baseline
+uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 \
+  --image_index 0 --model unidac --visualization_range 0.5 10.0
+
+# Fisheye camera (G1_A) — faster metric comparison baseline
+uv run python run_depth.py --data_dir ../ --sensor G1_A --recording recording1 \
+  --image_index 0 --model dac --variant dac-indoor-resnet101 \
+  --visualization_range 0.5 10.0
 ```
 
 > **Note on units.** Depth Anything V2 outputs *relative* (inverse) depth in
@@ -314,11 +371,13 @@ uv run python run_depth.py --data_dir ../ --sensor ZED_B --encoder large
 
 DAC ([Guo et al., CVPR 2025](https://github.com/yuliangguo/depth_any_camera))
 gives zero-shot **metric** depth and handles fisheye intrinsics natively.
-One-time setup (clone the repo; weights download from HuggingFace on first run,
-~700 MB, cached afterwards):
+If you did not already complete the local setup above, clone and pin the DAC
+source. Its weights download from Hugging Face on first run (~700 MB) and are
+cached afterwards:
 
 ```bash
 git clone https://github.com/yuliangguo/depth_any_camera.git third_party/depth_any_camera
+git -C third_party/depth_any_camera checkout 371ee299429257bb9a27d1e23b7dc53670e37023
 ```
 
 The compiled deformable-attention C++ op is **not** required (the ResNet101
@@ -343,7 +402,15 @@ Available variants: `dac-indoor-resnet101`, `dac-indoor-swinl`,
 
 ### UniDAC — metric depth, Colab GPU recommended
 
-The Colab notebook above installs the pinned official source and checkpoint.
+The Colab notebook above installs the pinned official source and checkpoint. A
+local run requires the pinned UniDAC checkout from the setup section; if it is
+not present, run:
+
+```bash
+git clone https://github.com/girish1511/UniDAC.git third_party/UniDAC
+git -C third_party/UniDAC checkout 9ddfc1f4cea68e08273ec9bca037f2ef9e1aa90e
+```
+
 For the circular G1_A lens, the adapter expands UniDAC's rectangular ERP crop
 to cover the full vertical fisheye field of view and masks the black lens border
 before inference. The saved metadata records the effective ERP crop and FoV.
@@ -408,16 +475,20 @@ timing, visualization, and reporting protocol.
 ```bash
 uv run python run_depth.py \
   --data_dir ../ \
-  --sensor {ZED_B|G1_A} \           # perspective | fisheye
-  --recording recording1 \         # recording1..4
-  --image_index 0 \                # frame index
-  --model {depth_anything_v2|dac|unidac} \
-  --variant dac-indoor-resnet101 \ # only with --model dac
-  --encoder {small|base|large} \   # only for depth_anything_v2
-  --fisheye_mask {auto|none} \     # auto-masks the lens circle on fisheye
-  --invalid_value {nan|zero} \     # value written to masked pixels
-  --visualization_range 0.5 10.0   # shared report scale; optional
+  --sensor G1_A \
+  --recording recording1 \
+  --image_index 0 \
+  --model dac \
+  --variant dac-indoor-resnet101 \
+  --fisheye_mask auto \
+  --invalid_value nan \
+  --visualization_range 0.5 10.0
 ```
 
 - Omit `--model` to use the default `depth_anything_v2`.
-- `--variant` applies only when `--model dac`; `--encoder` only for Depth Anything V2.
+- `--sensor` accepts `ZED_B` or `G1_A`.
+- `--model` accepts `depth_anything_v2`, `dac`, `unidac`, or a full DAC variant.
+- `--variant` applies only when `--model dac`; `--encoder` accepts `small`,
+  `base`, or `large` and applies only to Depth Anything V2.
+- Run `uv run python run_depth.py --help` for LiDAR-evaluation, device, masking,
+  alignment, and output options.

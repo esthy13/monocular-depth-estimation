@@ -1,7 +1,9 @@
 # Experiment guide
 
-This guide is the reproducible path from camera images to metric person tracks
-and physical-sensor error measurements. Run commands from the repository root.
+This standalone guide is the reproducible path from camera images to metric
+person tracks and physical-sensor error measurements. Run commands from the
+repository root. The commands and paths were checked against the
+current implementation after the completed four-recording experiment.
 
 ## 1. Environment and data
 
@@ -13,7 +15,31 @@ uv sync --locked
 
 The data directory must contain `intrinsic.json`, `extrinsics.json`, and the
 `recording1` to `recording4` folders. The pipeline treats G1_A as the reference
-camera coordinate system.
+camera coordinate system. With the repository inside `cv_project_data/`, the
+expected layout is:
+
+```text
+cv_project_data/
+├── intrinsic.json
+├── extrinsics.json
+├── recording1/ ... recording4/
+└── monocular-depth-estimation/
+```
+
+For local DAC and UniDAC execution, install the pinned upstream sources used by
+the reference experiment. They are ignored by Git:
+
+```bash
+git clone https://github.com/yuliangguo/depth_any_camera.git third_party/depth_any_camera
+git -C third_party/depth_any_camera checkout 371ee299429257bb9a27d1e23b7dc53670e37023
+
+git clone https://github.com/girish1511/UniDAC.git third_party/UniDAC
+git -C third_party/UniDAC checkout 9ddfc1f4cea68e08273ec9bca037f2ef9e1aa90e
+```
+
+The official checkpoints download from Hugging Face on first use. Set
+`HF_TOKEN` in the shell or the git-ignored `.env` file only if authentication is
+required; never commit a token.
 
 Run UniDAC with
 [`notebooks/unidac_colab.ipynb`](../notebooks/unidac_colab.ipynb) and the matched
@@ -50,9 +76,9 @@ MAX_FRAMES_PER_SENSOR = 50
 OVERWRITE = False
 ```
 
-Use `FRAME_STEP = 1` and `MAX_FRAMES_PER_SENSOR = None` only for the final full
-sequence. The completed matched runs used all 133 frames from `recording1`. The
-next full experiment covers the remaining recordings with:
+Use `FRAME_STEP = 1` and `MAX_FRAMES_PER_SENSOR = None` for a full sequence. The
+completed matched experiment used all 133 frames from `recording1` and the
+following settings for the other three recordings:
 
 ```python
 RUN_BATCH = True
@@ -63,8 +89,9 @@ MAX_FRAMES_PER_SENSOR = None
 OVERWRITE = False
 ```
 
-This selects 124, 791, and 156 G1_A frames respectively: 1,071 frames per
-model. Run UniDAC first, then DAC. The notebooks resume from existing metadata
+This selects 124, 791, and 156 G1_A frames respectively: 1,071 additional
+frames and 1,204 total frames per model. To reproduce the comparison, use the
+same settings for UniDAC and DAC. The notebooks resume from existing metadata
 and raw-depth files if Colab disconnects.
 
 The notebooks store raw metric depth and metadata under their separate roots:
@@ -143,11 +170,21 @@ uv run python compare_evaluation_runs.py \
 The command warns when frame counts or sampling settings differ. Do not claim
 one model is better unless the compared summaries use the same protocol.
 
-After `recording2`–`recording4` are complete for both models, the DAC notebook's
-comparison cell also calls `compare_evaluation_suite.py`. It combines
-`recording1`–`recording4`, weighting accuracy metrics by the number of valid
-physical-reference detections and timing by processed frames. The resulting
-CSV and Markdown report are stored under:
+For the completed four-recording result, combine the matched evaluation roots:
+
+```bash
+uv run python compare_evaluation_suite.py \
+  --model_root UniDAC=outputs/evaluation/unidac \
+  --model_root DAC=outputs/evaluation/dac \
+  --recordings recording1 recording2 recording3 recording4 \
+  --output_csv outputs/evaluation/all_recordings/model_comparison.csv \
+  --output_markdown outputs/evaluation/all_recordings/model_comparison.md
+```
+
+The tool expects each model root to contain
+`<recording>/evaluation_summary.json`. It weights accuracy metrics by the number
+of valid physical-reference detections and timing by processed frames. The DAC
+notebook runs the same command and stores its CSV and Markdown report under:
 
 ```text
 MyDrive/cv_project_outputs/comparison/all_recordings/
@@ -262,3 +299,18 @@ directory and filename contract, so the comparison tools work with either.
 The local Metal benchmark uses the same `benchmark_depth_models.py` protocol as
 Colab with `--device mps`. Do not mix its latency measurements with the earlier
 Tesla T4 timings; report hardware-specific speed tables separately.
+
+## 11. Documentation and code checks
+
+Before sharing a new result or changing the board tasks to Done, run:
+
+```bash
+uv run python run_depth.py --help
+uv run python evaluate_person_tracking.py --help
+uv run python compare_evaluation_suite.py --help
+PYTHONPATH=. uv run --with pytest pytest -q tests
+```
+
+The `PYTHONPATH=.` prefix is needed when invoking the temporary `pytest` console
+script so imports resolve from the repository root. The test-only dependency is
+provided transiently by `uv run --with` and is not added to the runtime lockfile.

@@ -1,12 +1,43 @@
-# Project update: DAC and UniDAC comparison with LiDAR
+# Project update: monocular depth and 3D person localization
 
 **Date:** 19 August 2026  
-**Suggested subject:** Project update: DAC and UniDAC comparison with LiDAR
+**Suggested subject:** Project update: monocular depth and 3D person localization
 
 Dear Christopher,
 
-Here is a short update on our 3D person localization results with the G1_A
-fisheye camera. DAC and UniDAC both receive the calibrated fisheye intrinsics
+Here is a short update on our monocular depth and 3D person localization work.
+We evaluated Depth Anything V2, DAC, and UniDAC against projected LiDAR points
+for the ZED_B perspective camera. We also completed the person tracking and 3D
+localization comparison between DAC and UniDAC for the G1_A fisheye camera.
+
+## Perspective camera depth comparison
+
+We first inspected three representative frames from recording 2: a blurred
+person, a sharp person, and a static scene without a person. The table shows
+MAE and AbsRel against the projected LiDAR points.
+
+| Frame | Depth Anything V2, oracle aligned | DAC | UniDAC |
+| --- | ---: | ---: | ---: |
+| Blurred person | 1.351 m / 0.262 | 1.637 m / 0.299 | **1.188 m / 0.229** |
+| Sharp person | 0.321 m / 0.076 | 0.862 m / 0.218 | **0.646 m / 0.179** |
+| Static scene | 0.105 m / 0.016 | 0.961 m / 0.214 | **0.587 m / 0.140** |
+
+Each entry is MAE / AbsRel. Among the two direct metric models, UniDAC performs
+better than DAC on all three examples. It also handles the blurred person more
+accurately. Depth Anything V2 performs especially well on the sharp and static
+examples after alignment, but it produces relative depth. Its scale and shift
+were fitted separately on each evaluated frame using that frame's LiDAR points,
+so these values measure depth shape after oracle alignment, not independent
+metric accuracy.
+
+The camera and LiDAR timestamps are matched within 50 ms. Their residual time
+difference has a standard deviation of about 26 ms across the four recordings.
+Motion blur, remaining synchronization differences, and the different sensor
+viewpoints can therefore increase the error around moving people.
+
+## Fisheye camera person localization
+
+For the fisheye pipeline, DAC and UniDAC both receive the calibrated intrinsics
 and distortion parameters and return metric distance. We use YOLO26 for person
 masks, ByteTrack for persistent IDs, and the median depth inside each person
 mask to calculate a 3D point in the G1_A camera coordinate system.
@@ -39,17 +70,17 @@ investigate and report this far range failure.
 In our controlled M1 Pro benchmark, DAC took 390 ms per frame, or 2.56 FPS,
 while UniDAC took 1,087 ms, or 0.92 FPS. DAC was about 2.8 times faster.
 
-We have not included Depth Anything V2 in the metric ranking because its output
-is relative. Fitting it on the same LiDAR points can check the predicted depth
-shape, but it is not a fair metric test. A fair comparison would calibrate it on
-separate frames and evaluate it on held-out frames.
-
 Our current conclusion is to use UniDAC as the accuracy-focused model and DAC
-as the faster baseline. We treat LiDAR as a physical reference rather than
-perfect ground truth because calibration, synchronization, and viewpoint
-differences can also affect the error. We would be glad to hear whether this
-evaluation and our planned long-range follow-up cover the main points needed
-for the final report.
+as the faster baseline for direct metric depth. For Depth Anything V2, a fair
+metric comparison would fit one fixed calibration on separate frames and then
+evaluate it on held-out frames. We treat LiDAR as a physical reference rather
+than perfect ground truth because calibration, synchronization, and viewpoint
+differences can also affect the error.
+
+Our next steps are to investigate the UniDAC far-range failure in recording 4,
+inspect the effect of blur and synchronization on the perspective results, and
+prepare the final report evaluation. We would be glad to hear whether this
+covers the main points you would like us to prioritize.
 
 Best regards,  
 Esther Giuliano and Fazel Malekian

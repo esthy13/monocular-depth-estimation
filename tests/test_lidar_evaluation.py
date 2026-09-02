@@ -1,8 +1,11 @@
+import csv
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
-from src.lidar_evaluation import align_depth, evaluate_depth
+from src.lidar_evaluation import align_depth, evaluate_depth, save_point_samples
 
 
 class LeastSquaresAlignmentTests(unittest.TestCase):
@@ -49,6 +52,22 @@ class LeastSquaresAlignmentTests(unittest.TestCase):
         self.assertGreater(scale, 0)
         self.assertAlmostEqual(shift, -0.5)
         np.testing.assert_allclose(aligned, gt)
+
+    def test_point_samples_include_signed_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "samples.csv"
+            save_point_samples(
+                path,
+                np.array([[10.0, 20.0]]),
+                np.array([4.0]),
+                np.array([3.0]),
+                np.array([3.5]),
+            )
+
+            with path.open(newline="") as file:
+                row = next(csv.DictReader(file))
+            self.assertAlmostEqual(float(row["signed_error_m"]), -0.5)
+            self.assertAlmostEqual(float(row["absolute_error_m"]), 0.5)
 
 
 if __name__ == "__main__":

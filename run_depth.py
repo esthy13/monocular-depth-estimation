@@ -177,6 +177,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--debug_evaluation", action="store_true", help="Write per-frame LiDAR/depth diagnostics to CSV.")
     parser.add_argument("--plot_evaluation", action="store_true", help="Save evaluation plots under outputs/evaluation_plots/.")
+    parser.add_argument(
+        "--residual_error_limit_m",
+        type=float,
+        default=2.0,
+        help=(
+            "Symmetric color limit for signed prediction-minus-LiDAR residual "
+            "overlays saved with --plot_evaluation."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -199,6 +208,7 @@ def main() -> None:
         parse_timestamp,
     )
     from src.depth_models import build_depth_model
+    from plot_evaluation_diagnostics import save_lidar_residual_overlay
     from src.lidar_evaluation import (
         evaluate_depth,
         keep_nearest_per_pixel,
@@ -416,10 +426,18 @@ def main() -> None:
         metric_prediction_proxy = prediction_proxy[aligned_valid]
         metric_aligned_prediction = aligned_prediction[aligned_valid]
         save_projection_overlay(image, pixels, lidar_depth, output_dir / f"{stem}_lidar_projection.png")
+        samples_path = output_dir / f"{stem}_lidar_samples.csv"
         if args.debug_evaluation or args.plot_evaluation:
             save_evaluation_visualization(image, depth, metric_pixels, metric_lidar_depth, metric_aligned_prediction, output_dir / f"{stem}_evaluation_panels.png")
         save_metrics(output_dir / f"{stem}_lidar_metrics.json", result, image=str(image_path), lidar_cloud=str(lidar_path), camera_sensor=args.sensor, lidar_sensor=args.lidar_sensor, timestamp_tolerance_s=args.max_lidar_dt, time_offset_s=args.time_offset, extrinsics_convention=args.extrinsics_convention, prediction_representation=("metric_depth_m" if getattr(model, "is_metric", False) else "raw_relative_inverse_depth"), alignment_scope="per_frame", evaluation_role=("metric_evaluation" if alignment == "none" else "oracle_diagnostic_not_metric_accuracy"), invalid_prediction_points=invalid_prediction_points, invalid_lidar_points=invalid_lidar_points + invalid_projected_lidar_points, excluded_after_alignment=excluded_after_alignment)
-        save_point_samples(output_dir / f"{stem}_lidar_samples.csv", metric_pixels, metric_lidar_depth, metric_prediction_proxy, metric_aligned_prediction)
+        save_point_samples(samples_path, metric_pixels, metric_lidar_depth, metric_prediction_proxy, metric_aligned_prediction)
+        if args.plot_evaluation:
+            save_lidar_residual_overlay(
+                image_path,
+                samples_path,
+                output_dir / f"{stem}_signed_error_overlay.png",
+                error_limit_m=args.residual_error_limit_m,
+            )
         global_aligned_predictions.append(metric_aligned_prediction)
         global_ground_truth.append(metric_lidar_depth)
         frame_results.append(result)

@@ -159,6 +159,45 @@ This produces:
 The evaluator can process any metric model stored in the same output layout. It
 reads the model name and saved depth inference time from each metadata JSON.
 
+### Plot the two physical-reference diagnostics
+
+`run_depth.py --plot_evaluation` now saves a signed residual overlay for every
+evaluated perspective frame. The residual is defined as prediction minus LiDAR
+depth. Blue points are predicted closer than LiDAR, red points are predicted
+farther, and white points agree. The default fixed range is -2.0 to +2.0 m;
+change it with `--residual_error_limit_m` only when the plot states the new
+range.
+
+An overlay can also be recreated from an existing RGB image and its pointwise
+CSV without rerunning inference:
+
+```bash
+uv run python plot_evaluation_diagnostics.py residual-overlay \
+  --image outputs/perspective/unidac/recording2/recording2_ZED_B_0014_rgb.jpg \
+  --samples outputs/perspective/unidac/recording2/recording2_ZED_B_0014_lidar_samples.csv \
+  --error-limit-m 2.0 \
+  --output outputs/plots/unidac_recording2_frame14_signed_error.png
+```
+
+Create the person plot from the matched per-detection measurements:
+
+```bash
+uv run python plot_evaluation_diagnostics.py localization-error \
+  --run DAC=outputs/evaluation/dac/recording2/person_measurements.csv \
+  --run DAC=outputs/evaluation/dac/recording3/person_measurements.csv \
+  --run DAC=outputs/evaluation/dac/recording4/person_measurements.csv \
+  --run UniDAC=outputs/evaluation/unidac/recording2/person_measurements.csv \
+  --run UniDAC=outputs/evaluation/unidac/recording3/person_measurements.csv \
+  --run UniDAC=outputs/evaluation/unidac/recording4/person_measurements.csv \
+  --reference lidar \
+  --bin-width-m 1.0 \
+  --output outputs/plots/person_localization_error_vs_lidar_distance.png
+```
+
+The x-axis is ground-truth person range from the saved LiDAR XYZ position and
+the y-axis is Euclidean 3D localization error. Translucent points show every
+valid match; lines show the median error in each occupied 1 m distance bin.
+
 ## 6. Compare UniDAC and DAC
 
 Evaluate both models on exactly the same recording, start index, frame step,

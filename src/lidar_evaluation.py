@@ -195,9 +195,9 @@ def save_point_samples(path: Path, pixels: np.ndarray, lidar_depth: np.ndarray, 
     """Save pointwise values in a portable CSV for plotting and audit."""
     with Path(path).open("w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(("u_px", "v_px", "lidar_depth_m", "prediction_proxy", "aligned_prediction_m", "absolute_error_m", "relative_error"))
+        writer.writerow(("u_px", "v_px", "lidar_depth_m", "prediction_proxy", "aligned_prediction_m", "signed_error_m", "absolute_error_m", "relative_error"))
         for pixel, gt, raw, metric in zip(pixels, lidar_depth, predicted, aligned):
-            writer.writerow((pixel[0], pixel[1], gt, raw, metric, abs(metric - gt), abs(metric - gt) / gt))
+            writer.writerow((pixel[0], pixel[1], gt, raw, metric, metric - gt, abs(metric - gt), abs(metric - gt) / gt))
 
 
 def save_metrics(path: Path, result: EvaluationResult, **metadata: object) -> None:

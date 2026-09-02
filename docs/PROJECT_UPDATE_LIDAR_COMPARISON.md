@@ -1,6 +1,6 @@
 # Project update: monocular depth and 3D person localization
 
-**Date:** 19 August 2026  
+**Date:** 2 September 2026
 **Suggested subject:** Project update: monocular depth and 3D person localization
 
 Dear Christopher,
@@ -39,6 +39,15 @@ only at pixels with a valid projected LiDAR reference.
 
 ![Representative perspective UniDAC prediction with partial LiDAR coverage](images/perspective_unidac_lidar_coverage.png)
 
+Following your suggestion, we also created a signed residual overlay. Each
+point is coloured by `predicted depth - LiDAR depth`. Blue means UniDAC predicts
+the surface closer than the LiDAR return, red means farther, and white means
+agreement. Values outside the fixed -2.0 to +2.0 m colour range are clipped.
+The absence of points on the left is caused by the narrower LiDAR field of view,
+not missing model predictions.
+
+![Signed UniDAC depth residuals at projected LiDAR points](images/unidac_perspective_signed_lidar_residual.png)
+
 The camera and LiDAR timestamps are matched within 50 ms. Their residual time
 difference has a standard deviation of about 26 ms across the four recordings.
 Motion blur, remaining synchronization differences, and the different sensor
@@ -75,6 +84,14 @@ compared with DAC. It performed better in recordings 1 to 3. Recording 4 was
 the exception. In 24 frames, UniDAC had more than 1 m error and placed the
 person at about 8.4 to 10.4 m, while LiDAR measured 6.1 to 7.0 m. We will
 investigate and report this far range failure.
+
+The following plot uses all 647 valid person/LiDAR matches per model from
+recordings 2 to 4. Each translucent point is one detection. The solid lines
+show median 3D localization error in 1 m ground-truth distance bins. UniDAC has
+lower median error through most of the measured range, while its recording 4
+failure appears as the sharp increase beyond approximately 6 m.
+
+![DAC and UniDAC person localization error versus LiDAR distance](images/person_localization_error_vs_lidar_distance.png)
 
 In our controlled M1 Pro benchmark, DAC took 390 ms per frame, or 2.56 FPS,
 while UniDAC took 1,087 ms, or 0.92 FPS. DAC was about 2.8 times faster.

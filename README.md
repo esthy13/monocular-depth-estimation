@@ -46,6 +46,7 @@ monocular-depth-estimation/
 ├── run_depth.py                # single-frame depth inference
 ├── run_metric_depth_batch.py   # resumable CUDA/MPS metric-depth batch
 ├── evaluate_person_tracking.py # 3D person/sensor evaluation
+├── plot_evaluation_diagnostics.py # signed residual and distance-error plots
 ├── compare_evaluation_runs.py  # UniDAC/DAC accuracy report table
 ├── compare_evaluation_suite.py # weighted multi-recording comparison
 ├── summarize_lidar_suite.py    # validated perspective/LiDAR aggregation
@@ -287,7 +288,7 @@ your calibration stores the inverse direction, add:
 --extrinsics_convention reference_to_sensor
 ```
 
-The run writes three additional files alongside the depth output:
+The run writes the following additional files alongside the depth output:
 
 - `_lidar_projection.png`: RGB image with the nearest projected LiDAR return
   per pixel, coloured by LiDAR depth. This is the primary calibration sanity
@@ -295,7 +296,11 @@ The run writes three additional files alongside the depth output:
 - `_lidar_metrics.json`: count, alignment parameters, MAE, RMSE, AbsRel,
   SqRel, log-RMSE, and the standard δ<1.25 / δ<1.25² / δ<1.25³ accuracies.
 - `_lidar_samples.csv`: pixel coordinates and each LiDAR/predicted depth pair,
-  for plotting or further analysis.
+  including signed and absolute error for plotting or further analysis.
+- `_signed_error_overlay.png`: with `--plot_evaluation`, projected samples
+  coloured by signed `prediction - LiDAR` error. Blue means that the predicted
+  surface is closer than the LiDAR return, red means farther, and white means
+  agreement. The default fixed range is -2.0 to +2.0 m.
 
 Depth Anything V2 is not metrically scaled. For it, the default `--alignment
 auto` takes the reciprocal of its inverse-depth output and estimates a
@@ -339,6 +344,37 @@ uv run python analyze_lidar_outliers.py \
 The blur analysis uses variance of the Laplacian inside eroded YOLO person
 masks. Lower values mean less person detail. Its Spearman correlation tests an
 association with error; it does not establish blur as the cause.
+
+### Signed residual and person distance-error plots
+
+Existing pointwise output can be plotted without rerunning a model:
+
+```bash
+uv run python plot_evaluation_diagnostics.py residual-overlay \
+  --image outputs/unidac/recording2/recording2_ZED_B_0014_rgb.jpg \
+  --samples outputs/unidac/recording2/recording2_ZED_B_0014_lidar_samples.csv \
+  --error-limit-m 2.0 \
+  --output outputs/unidac/recording2/recording2_ZED_B_0014_signed_error_overlay.png
+```
+
+Plot 3D person localization error against physical-reference distance by
+passing one or more result files per model. Repeating a label combines its
+recordings:
+
+```bash
+uv run python plot_evaluation_diagnostics.py localization-error \
+  --run DAC=outputs/evaluation/dac/recording2/person_measurements.csv \
+  --run DAC=outputs/evaluation/dac/recording3/person_measurements.csv \
+  --run UniDAC=outputs/evaluation/unidac/recording2/person_measurements.csv \
+  --run UniDAC=outputs/evaluation/unidac/recording3/person_measurements.csv \
+  --reference lidar \
+  --bin-width-m 1.0 \
+  --output outputs/evaluation/person_localization_error_vs_lidar_distance.png
+```
+
+Each translucent point is one valid person/reference match. The solid line is
+the median error in each occupied distance bin. The x-axis uses the Euclidean
+range of the saved reference XYZ position, falling back to its median range.
 
 ## LiDAR projection (fisheye camera)
 

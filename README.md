@@ -28,7 +28,6 @@ The current result and known long-range failure are summarized below.
 - [Experiment and execution guide](docs/EXPERIMENT_GUIDE.md)
 - [Depth visualization scale policy](docs/VISUALIZATION_SCALE.md)
 - [Camera geometry used by each model](docs/MODEL_GEOMETRY.md)
-- [Project update: models compared with LiDAR](docs/PROJECT_UPDATE_LIDAR_COMPARISON.md)
 - [Recording 1 UniDAC full-sequence results](docs/RESULTS_RECORDING1_UNIDAC.md)
 - [Recording 1 matched DAC versus UniDAC results](docs/RESULTS_RECORDING1_DAC_VS_UNIDAC.md)
 - [All-recording matched DAC versus UniDAC results](docs/RESULTS_ALL_RECORDINGS_DAC_VS_UNIDAC.md)
@@ -121,9 +120,9 @@ Use the UniDAC notebook for the newer metric-depth candidate and the DAC
 notebook for the established `dac-indoor-resnet101` baseline. Both notebooks
 use the same calibrated output and evaluation protocol.
 
-- UniDAC: [![Open UniDAC in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/esthy13/monocular-depth-estimation/blob/unidac-lidar/notebooks/unidac_colab.ipynb)
-- DAC baseline: [![Open DAC in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/esthy13/monocular-depth-estimation/blob/unidac-lidar/notebooks/dac_colab.ipynb)
-- Controlled speed benchmark: [![Open benchmark in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/esthy13/monocular-depth-estimation/blob/unidac-lidar/notebooks/benchmark_colab.ipynb)
+- UniDAC: [![Open UniDAC in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/esthy13/monocular-depth-estimation/blob/main/notebooks/unidac_colab.ipynb)
+- DAC baseline: [![Open DAC in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/esthy13/monocular-depth-estimation/blob/main/notebooks/dac_colab.ipynb)
+- Controlled speed benchmark: [![Open benchmark in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/esthy13/monocular-depth-estimation/blob/main/notebooks/benchmark_colab.ipynb)
 
 Because this repository is private, an unauthenticated Colab link returns 404.
 Open the notebook from Colab's GitHub picker after authorizing private-repository
@@ -356,6 +355,8 @@ uv run python plot_evaluation_diagnostics.py residual-overlay \
   --error-limit-m 2.0 \
   --output outputs/unidac/recording2/recording2_ZED_B_0014_signed_error_overlay.png
 ```
+
+![Signed UniDAC depth residuals at projected LiDAR points](docs/images/unidac_perspective_signed_lidar_residual.png)
 
 Plot 3D person localization error against physical-reference distance by
 passing one or more result files per model. Repeating a label combines its

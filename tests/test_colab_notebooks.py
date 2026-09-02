@@ -19,7 +19,7 @@ class ColabNotebookTests(unittest.TestCase):
             for cell in notebook["cells"]
         }
 
-        self.assertIn('PROJECT_REF = "unidac-lidar"', sources["experiment-settings"])
+        self.assertIn('PROJECT_REF = "main"', sources["experiment-settings"])
         self.assertIn(
             'BATCH_RECORDINGS = ["recording2", "recording3", "recording4"]',
             sources["resumable-batch"],

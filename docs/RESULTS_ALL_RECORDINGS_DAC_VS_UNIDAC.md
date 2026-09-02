@@ -67,6 +67,16 @@ with 0.595 m for DAC.
 This segment must be shown in the final report. It demonstrates that the
 overall winner can still have a safety-relevant failure mode at longer range.
 
+## Localization error by LiDAR reference distance
+
+The plot below uses the 647 valid person/LiDAR matches per model from
+`recording2` to `recording4`. Each translucent point is one detection. The
+solid lines show median 3D localization error in occupied 1 m reference-distance
+bins. UniDAC has lower median error through most of the measured range, while
+the sharp increase beyond 6 m exposes its localized `recording4` failure.
+
+![3D person localization error versus LiDAR reference distance](images/person_localization_error_vs_lidar_distance.png)
+
 ## Controlled Apple Metal speed result
 
 The dedicated benchmark used ten fixed `recording1` frames, five warm-up runs
@@ -89,4 +99,3 @@ alongside the 2.8-times local latency cost and the `recording4` far-range
 failure. Before a safety claim, investigate that failure segment and evaluate
 more long-range sequences; the current result supports model selection for the
 semester experiment, not deployment certification.
-
